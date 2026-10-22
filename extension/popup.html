@@ -36,8 +36,9 @@
         </span>
         <p>
           <strong>Nothing is read until you click.</strong>
-          The visible viewport text and a viewport screenshot are sent to your local BhashaGuard server for Gemma 4
-          analysis. Credentials stay on that server. No page content is changed.
+          This version sends the current viewport's visible text and a viewport screenshot to your local BhashaGuard
+          server for Gemma 4 analysis. Credentials stay on that server. No page content is changed until you review a
+          finding and choose Apply.
         </p>
       </section>
 
@@ -51,61 +52,128 @@
         <span id="scan-button-label">Scan this page</span>
       </button>
 
-      <div class="status-row">
+      <div class="status-row" id="status-row" data-tone="idle">
         <span class="spinner" id="status-spinner" aria-hidden="true" hidden></span>
-        <p class="status" id="status" data-tone="idle" role="status" aria-live="polite">
-          Ready when you are. Nothing is scanned until you click.
-        </p>
+        <div class="status-copy">
+          <span class="status-eyebrow">Scan status</span>
+          <p class="status" id="status" data-tone="idle" role="status" aria-live="polite">
+            Ready when you are. Nothing is scanned until you click.
+          </p>
+        </div>
       </div>
 
-      <section class="results" id="results" aria-labelledby="results-heading" hidden>
+      <section class="scan-summary" id="scan-summary" aria-labelledby="scan-summary-heading" hidden>
         <div class="results-head">
-          <h2 id="results-heading">Extracted text</h2>
-          <span class="count-badge" id="candidate-count">0 candidates</span>
+          <div>
+            <p class="eyebrow">Current viewport</p>
+            <h2 id="scan-summary-heading">Scan summary</h2>
+          </div>
+          <span class="summary-badge" id="scan-completeness" data-tone="idle">Viewport scan</span>
         </div>
-        <p class="result-summary" id="result-summary"></p>
-        <ol class="candidate-list" id="candidate-list"></ol>
-        <p class="result-more" id="result-more" hidden></p>
 
-        <figure class="screenshot-figure" id="screenshot-figure">
-          <img
-            class="screenshot-preview"
-            id="screenshot-preview"
-            alt="Preview of the captured browser viewport"
-            hidden
-          />
-          <figcaption id="screenshot-caption">
-            Viewport screenshot sent with the visible text to your configured Gemma 4 endpoint.
-          </figcaption>
-        </figure>
+        <div class="summary-grid">
+          <div class="summary-metric">
+            <span class="summary-value" id="summary-candidates">0</span>
+            <span class="summary-label">Text candidates examined</span>
+          </div>
+          <div class="summary-metric">
+            <span class="summary-value" id="summary-findings">—</span>
+            <span class="summary-label">Findings identified</span>
+          </div>
+          <div class="summary-metric summary-metric-safe">
+            <span class="summary-value" id="summary-actionable">—</span>
+            <span class="summary-label">Safe to apply</span>
+          </div>
+          <div class="summary-metric summary-metric-review">
+            <span class="summary-value" id="summary-review">—</span>
+            <span class="summary-label">Need manual review</span>
+          </div>
+        </div>
+
+        <p class="summary-detail" id="summary-detail"></p>
+
+        <div class="partial-banner" id="partial-banner" role="status" hidden>
+          <strong>Partial scan.</strong>
+          <span id="partial-detail"></span>
+        </div>
+
+        <div class="category-summary" id="category-summary" aria-label="Finding categories" hidden>
+          <span class="category-chip category-chip-untranslated">
+            <span>Untranslated</span>
+            <strong id="category-untranslated">0</strong>
+          </span>
+          <span class="category-chip category-chip-quality">
+            <span>Potentially incorrect translation</span>
+            <strong id="category-quality">0</strong>
+          </span>
+          <span class="category-chip category-chip-other">
+            <span>Other</span>
+            <strong id="category-other">0</strong>
+          </span>
+        </div>
       </section>
 
       <section class="findings" id="findings" aria-labelledby="findings-heading" hidden>
         <div class="results-head">
-          <h2 id="findings-heading">Localization findings</h2>
+          <div>
+            <p class="eyebrow">Gemma 4 review</p>
+            <h2 id="findings-heading">Localization findings</h2>
+          </div>
           <span class="count-badge" id="finding-count">0 findings</span>
         </div>
         <p class="result-summary" id="findings-summary"></p>
+
+        <div class="review-banner" id="review-banner" hidden>
+          <strong>Human review required.</strong>
+          <span>Review each suggestion before Apply. Skip leaves the page unchanged.</span>
+        </div>
+
         <ol class="finding-list" id="findings-list"></ol>
-        <p class="result-more" id="findings-empty" hidden>
-          Gemma 4 did not identify any localization issues in these candidates.
+        <p class="findings-empty" id="findings-empty" hidden>
+          Gemma 4 did not identify any localization issues in the candidates reviewed.
         </p>
       </section>
 
-      <section class="analysis-notice" aria-label="Analysis status">
+      <section class="results evidence-panel" id="results" aria-labelledby="results-heading" hidden>
+        <details class="evidence-details">
+          <summary class="evidence-summary">
+            <span class="evidence-title" id="results-heading">Viewport evidence</span>
+            <span class="count-badge" id="candidate-count">0 candidates</span>
+          </summary>
+          <div class="evidence-body">
+            <p class="result-summary" id="result-summary"></p>
+            <ol class="candidate-list" id="candidate-list"></ol>
+            <p class="result-more" id="result-more" hidden></p>
+
+            <figure class="screenshot-figure" id="screenshot-figure">
+              <img
+                class="screenshot-preview"
+                id="screenshot-preview"
+                alt="Preview of the captured browser viewport"
+                hidden
+              />
+              <figcaption id="screenshot-caption">
+                Viewport screenshot sent with the visible text to your configured Gemma 4 endpoint.
+              </figcaption>
+            </figure>
+          </div>
+        </details>
+      </section>
+
+      <section class="analysis-notice" aria-label="Human review policy">
         <span class="analysis-dot" aria-hidden="true"></span>
         <div>
-          <h2>Gemma 4 review</h2>
+          <h2>Suggestions, not automatic changes</h2>
           <p>
-            Findings are suggestions only. Every correction needs human review, and BhashaGuard never changes the
-            page automatically.
+            Every correction needs human review. BhashaGuard never changes the page automatically, and a partial scan
+            is always labelled as partial.
           </p>
         </div>
       </section>
 
       <footer class="footer">
         <span>BhashaGuard v0.1.0</span>
-        <span>No page changes</span>
+        <span>No page changes until Apply</span>
       </footer>
     </main>
 

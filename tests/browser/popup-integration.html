@@ -5,9 +5,38 @@
 <span id="hostname"></span>
 <button id="scan-button"><span id="scan-button-label">Scan</span></button>
 <span id="status-spinner"></span>
-<p id="status"></p>
-<section id="results" hidden><h2 id="results-heading"></h2><p id="candidate-count"></p><p id="result-summary"></p><ul id="candidate-list"></ul><p id="result-more"></p><figure id="screenshot-figure"><img id="screenshot-preview"><figcaption id="screenshot-caption"></figcaption></figure></section>
-<section id="findings" hidden><h2 id="findings-heading"></h2><p id="finding-count"></p><p id="findings-summary"></p><ul id="findings-list"></ul><p id="findings-empty"></p></section>
+<div id="status-row"><p id="status"></p></div>
+<section id="scan-summary" hidden>
+  <h2 id="scan-summary-heading"></h2>
+  <span id="scan-completeness"></span>
+  <span id="summary-candidates"></span>
+  <span id="summary-findings"></span>
+  <span id="summary-actionable"></span>
+  <span id="summary-review"></span>
+  <p id="summary-detail"></p>
+  <div id="partial-banner" hidden><span id="partial-detail"></span></div>
+  <div id="category-summary" hidden>
+    <span id="category-untranslated"></span>
+    <span id="category-quality"></span>
+    <span id="category-other"></span>
+  </div>
+</section>
+<section id="results" hidden>
+  <h2 id="results-heading"></h2>
+  <p id="candidate-count"></p>
+  <p id="result-summary"></p>
+  <ul id="candidate-list"></ul>
+  <p id="result-more"></p>
+  <figure id="screenshot-figure"><img id="screenshot-preview"><figcaption id="screenshot-caption"></figcaption></figure>
+</section>
+<section id="findings" hidden>
+  <h2 id="findings-heading"></h2>
+  <p id="finding-count"></p>
+  <p id="findings-summary"></p>
+  <div id="review-banner" hidden>Human review required.</div>
+  <ul id="findings-list"></ul>
+  <p id="findings-empty"></p>
+</section>
 <pre id="results-output">PENDING</pre>
 <script>
   window.__sent = [];
@@ -82,7 +111,7 @@
             candidateId: "bg-test-fail",
             originalText: "Change me",
             suggestedText: "बदलले",
-            category: "untranslated",
+            category: "incomplete_translation",
             severity: "high",
             evidence: "English text",
             explanation: "Should fail safely.",
@@ -103,31 +132,90 @@
       candidates
     );
 
+    const scan = {
+      sessionId: "scan-test",
+      candidates,
+      totalEligible: 6,
+      truncated: true,
+      viewport: { width: 1200, height: 800 },
+    };
+
+    state.lastScan = scan;
+    renderResults(scan, "data:image/png;base64,iVBORw0KGgo=");
+
+    const out = {
+      summaryVisible: document.getElementById("scan-summary").hidden === false,
+      summaryBeforeAnalysis: document.getElementById("summary-findings").textContent === "—",
+      summaryCandidates: document.getElementById("summary-candidates").textContent,
+      partialBadge: document.getElementById("scan-completeness").textContent,
+      partialBannerVisible:
+        document.getElementById("partial-banner").hidden === false &&
+        document.getElementById("partial-detail").textContent.includes("5 of 6"),
+    };
+
     renderFindings(analysis);
     const items = [...document.querySelectorAll("#findings-list .finding")];
     const visibleButtons = (item) =>
-      [...item.querySelectorAll(".correction-button")].filter((button) => !button.hidden);
-    const out = {
-      noAutoApply: window.__sent.length === 0,
-      itemCount: items.length,
-      validationMappedActionable:
-        analysis.findings[0].actionable === true && analysis.findings[1].actionable === false,
-      actionableShowsApply:
-        visibleButtons(items[0]).length === 1 && visibleButtons(items[0])[0].textContent === "Apply correction",
-      nonActionableHidesApply:
-        visibleButtons(items[1]).length === 0 &&
-        items[1].querySelector(".correction-status").textContent.includes("Not safely actionable"),
-      noSuggestionHidesApply:
-        visibleButtons(items[2]).length === 0 &&
-        items[2].querySelector(".correction-status").textContent.includes("No Marathi replacement"),
-      failShowsApply: visibleButtons(items[3]).length === 1,
-      markupLiteral:
-        items[4].querySelector(".finding-suggested").textContent.includes("<img") &&
-        document.querySelector("#findings-list img") === null &&
-        window.__xss === undefined,
-    };
+      [...item.querySelectorAll(".finding-actions button")].filter((button) => !button.hidden);
+    const applyButtonFor = (item) =>
+      item.querySelector(".correction-button:not(.correction-undo)");
+    const skipButtonFor = (item) => item.querySelector(".skip-button");
 
-    const applyButton = visibleButtons(items[0])[0];
+    out.summaryFindings = document.getElementById("summary-findings").textContent;
+    out.summaryActionable = document.getElementById("summary-actionable").textContent;
+    out.summaryReview = document.getElementById("summary-review").textContent;
+    out.summaryDetailMentionsReview = document
+      .getElementById("summary-detail")
+      .textContent.includes("human review");
+    out.categorySummaryVisible = document.getElementById("category-summary").hidden === false;
+    out.categoryUntranslated = document.getElementById("category-untranslated").textContent;
+    out.categoryQuality = document.getElementById("category-quality").textContent;
+    out.categoryOther = document.getElementById("category-other").textContent;
+    out.reviewBannerVisible = document.getElementById("review-banner").hidden === false;
+    out.noAutoApply = window.__sent.length === 0;
+    out.itemCount = items.length;
+    out.validationMappedActionable =
+      analysis.findings[0].actionable === true && analysis.findings[1].actionable === false;
+    out.actionableShowsApplyAndSkip =
+      visibleButtons(items[0]).length === 2 &&
+      applyButtonFor(items[0]).textContent === "Apply correction" &&
+      skipButtonFor(items[0]).textContent === "Skip";
+    out.nonActionableHidesActions =
+      visibleButtons(items[1]).length === 0 &&
+      items[1].querySelector(".finding-actionability").textContent === "Manual review only" &&
+      items[1].querySelector(".correction-status").textContent.includes("Not safely actionable");
+    out.noSuggestionHidesActions =
+      visibleButtons(items[2]).length === 0 &&
+      items[2].querySelector(".finding-actionability").textContent === "No safe suggestion" &&
+      items[2].querySelector(".correction-status").textContent.includes("No Marathi replacement");
+    out.failShowsApply = applyButtonFor(items[3]).hidden === false;
+    out.evidenceFieldsPresent =
+      items[0].querySelector(".finding-original").textContent === "Apply Now" &&
+      items[0].querySelector(".finding-suggested").textContent === "आता अर्ज करा" &&
+      items[0].querySelector(".finding-evidence").textContent === "English button text";
+    out.markupLiteral =
+      items[4].querySelector(".finding-suggested").textContent.includes("<img") &&
+      document.querySelector("#findings-list img") === null &&
+      window.__xss === undefined;
+
+    const applyButton = applyButtonFor(items[0]);
+    const skipButton = skipButtonFor(items[0]);
+    const messagesBeforeSkip = window.__sent.length;
+
+    skipButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    out.skipSendsNoMessage = window.__sent.length === messagesBeforeSkip;
+    out.skipHidesApply = applyButton.hidden === true;
+    out.skipChangesLabel = skipButton.textContent === "Review again";
+    out.skipStatusMentionsNoChange = items[0]
+      .querySelector(".correction-status")
+      .textContent.includes("No page text was changed");
+
+    skipButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    out.reviewAgainShowsApply = applyButton.hidden === false;
+    out.reviewAgainSendsNoMessage = window.__sent.length === messagesBeforeSkip;
+
     applyButton.click();
     await new Promise((resolve) => setTimeout(resolve, 10));
     const applyMessage = window.__sent[0];
@@ -138,6 +226,7 @@
       applyMessage.message.originalText === "Apply Now" &&
       applyMessage.message.replacementText === "आता अर्ज करा";
     out.applyHidesApply = applyButton.hidden === true;
+    out.applyHidesSkip = skipButton.hidden === true;
     const undoButton = items[0].querySelector(".correction-undo");
     out.applyShowsUndo = undoButton.hidden === false;
     out.applyStatusMentionsTemporary = items[0]
@@ -153,16 +242,22 @@
       undoMessage.message.candidateId === "bg-test-ok";
     out.undoShowsApply = applyButton.hidden === false;
     out.undoHidesUndo = undoButton.hidden === true;
+    out.undoShowsSkip = skipButton.hidden === false;
     out.undoStatusMentionsRestored = items[0]
       .querySelector(".correction-status")
       .textContent.includes("original text is restored");
 
-    visibleButtons(items[3])[0].click();
+    applyButtonFor(items[3]).click();
     await new Promise((resolve) => setTimeout(resolve, 10));
-    out.failureKeepsApply = visibleButtons(items[3]).length === 1;
+    out.failureKeepsApply = applyButtonFor(items[3]).hidden === false;
     out.failureStatusMentionsChanged = items[3]
       .querySelector(".correction-status")
       .textContent.includes("text changed");
+
+    renderScanSummary({ ...scan, totalEligible: candidates.length, truncated: false }, analysis);
+    out.completeScanNotPartial =
+      document.getElementById("partial-banner").hidden === true &&
+      document.getElementById("scan-completeness").textContent === "Viewport scan complete";
 
     document.getElementById("results-output").textContent = "RESULT:" + JSON.stringify(out);
   } catch (error) {

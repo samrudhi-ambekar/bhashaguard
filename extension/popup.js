@@ -18,6 +18,15 @@ const CATEGORY_LABELS = {
   other: "Other",
 };
 
+const CATEGORY_GROUP_BY_CATEGORY = {
+  untranslated: "untranslated",
+  mixed_language: "quality",
+  incomplete_translation: "quality",
+  inconsistent_terminology: "quality",
+  unnatural_wording: "quality",
+  other: "other",
+};
+
 const SEVERITY_LABELS = {
   low: "Low",
   medium: "Medium",
@@ -67,6 +76,20 @@ const els = {
   scanButtonLabel: document.getElementById("scan-button-label"),
   status: document.getElementById("status"),
   statusSpinner: document.getElementById("status-spinner"),
+  statusRow: document.getElementById("status-row"),
+  scanSummary: document.getElementById("scan-summary"),
+  summaryCandidates: document.getElementById("summary-candidates"),
+  summaryFindings: document.getElementById("summary-findings"),
+  summaryActionable: document.getElementById("summary-actionable"),
+  summaryReview: document.getElementById("summary-review"),
+  summaryDetail: document.getElementById("summary-detail"),
+  scanCompleteness: document.getElementById("scan-completeness"),
+  partialBanner: document.getElementById("partial-banner"),
+  partialDetail: document.getElementById("partial-detail"),
+  categorySummary: document.getElementById("category-summary"),
+  categoryUntranslated: document.getElementById("category-untranslated"),
+  categoryQuality: document.getElementById("category-quality"),
+  categoryOther: document.getElementById("category-other"),
   results: document.getElementById("results"),
   candidateCount: document.getElementById("candidate-count"),
   resultSummary: document.getElementById("result-summary"),
@@ -77,6 +100,7 @@ const els = {
   findings: document.getElementById("findings"),
   findingCount: document.getElementById("finding-count"),
   findingsSummary: document.getElementById("findings-summary"),
+  reviewBanner: document.getElementById("review-banner"),
   findingsList: document.getElementById("findings-list"),
   findingsEmpty: document.getElementById("findings-empty"),
 };
@@ -86,6 +110,9 @@ const state = {
   pageBlocked: false,
   screenshotDataUrl: null,
   activeTabId: null,
+  lastScan: null,
+  lastAnalysis: null,
+  skippedCandidateIds: new Set(),
 };
 
 class ScanError extends Error {
@@ -158,20 +185,21 @@ async function handleScanClick() {
     }
 
     state.activeTabId = tab.id;
-    setStatus("Capturing the visible viewport…", "progress");
+    setStatus("Capturing the current viewport…", "progress");
     const screenshot = await captureViewport(tab);
     state.screenshotDataUrl = screenshot;
 
-    setStatus("Reading visible text in this viewport…", "progress");
+    setStatus("Reading eligible visible text in the current viewport…", "progress");
     await ensureScannerInjected(tab.id);
     const response = await requestScan(tab.id);
     const result = validateScanResponse(response);
+    state.lastScan = result;
 
     renderResults(result, screenshot);
 
     if (result.candidates.length === 0) {
       setStatus(
-        "Scan complete, but no eligible visible text was found in this viewport.",
+        "No eligible visible text was found in the current viewport. Nothing was sent to Gemma 4.",
         "warning"
       );
       return;
@@ -179,6 +207,7 @@ async function handleScanClick() {
 
     const count = result.candidates.length;
     const candidateLabel = count === 1 ? "candidate" : "candidates";
+    const partial = isPartialScan(result);
     setStatus(`Sending the screenshot and ${count} ${candidateLabel} to Gemma 4…`, "progress");
     els.scanButtonLabel.textContent = "Analyzing with Gemma 4…";
 
@@ -186,16 +215,27 @@ async function handleScanClick() {
       const analysis = await requestAnalysis(result, screenshot);
       renderFindings(analysis);
 
+      const safeCount = countSafeFindings(analysis.findings);
+      const reviewCount = analysis.findings.length - safeCount;
+      const scope = partial
+        ? "Partial viewport scan analyzed."
+        : "Viewport scan complete.";
+      const tone = partial ? "warning" : "success";
+
       if (analysis.findings.length === 0) {
         setStatus(
-          `Analysis complete. Gemma 4 found no localization issues in these ${count} ${candidateLabel}.`,
-          "success"
+          `${scope} Gemma 4 found no localization issues in the ${count} ${candidateLabel} reviewed.${
+            partial ? " The scan is not complete." : ""
+          }`,
+          tone
         );
       } else {
         const findingLabel = analysis.findings.length === 1 ? "finding" : "findings";
         setStatus(
-          `Analysis complete. ${analysis.findings.length} localization ${findingLabel} returned; all require human review.`,
-          "success"
+          `${scope} ${analysis.findings.length} localization ${findingLabel}; ${safeCount} safe to apply and ${reviewCount} ${
+            reviewCount === 1 ? "needs" : "need"
+          } manual review. All require human review.${partial ? " The scan is not complete." : ""}`,
+          tone
         );
       }
     } catch (error) {
@@ -517,6 +557,95 @@ function plainFindingText(value) {
   return text;
 }
 
+function isPartialScan(scan) {
+  if (!scan || !Array.isArray(scan.candidates)) {
+    return false;
+  }
+
+  return scan.truncated === true || scan.totalEligible > scan.candidates.length;
+}
+
+function isSafeFinding(finding) {
+  return Boolean(finding && finding.actionable === true && finding.suggestedText);
+}
+
+function countSafeFindings(findings) {
+  return Array.isArray(findings) ? findings.filter(isSafeFinding).length : 0;
+}
+
+function renderScanSummary(scan, analysis) {
+  if (!scan) {
+    els.scanSummary.hidden = true;
+    return;
+  }
+
+  const count = scan.candidates.length;
+  const reportedTotal = Number.isInteger(scan.totalEligible) ? scan.totalEligible : count;
+  const totalEligible = Math.max(reportedTotal, count);
+  const partial = isPartialScan(scan);
+  const findings = analysis && Array.isArray(analysis.findings) ? analysis.findings : null;
+  const safeCount = findings ? countSafeFindings(findings) : null;
+  const reviewCount = findings ? findings.length - safeCount : null;
+  const candidateLabel = count === 1 ? "candidate" : "candidates";
+
+  els.scanSummary.hidden = false;
+  els.summaryCandidates.textContent = String(count);
+  els.summaryFindings.textContent = findings ? String(findings.length) : "—";
+  els.summaryActionable.textContent = findings ? String(safeCount) : "—";
+  els.summaryReview.textContent = findings ? String(reviewCount) : "—";
+
+  if (count === 0) {
+    els.scanCompleteness.textContent = "No text found";
+    els.scanCompleteness.dataset.tone = "warning";
+  } else if (partial) {
+    els.scanCompleteness.textContent = "Partial viewport scan";
+    els.scanCompleteness.dataset.tone = "warning";
+  } else {
+    els.scanCompleteness.textContent = "Viewport scan complete";
+    els.scanCompleteness.dataset.tone = "success";
+  }
+
+  if (count === 0) {
+    els.summaryDetail.textContent =
+      "No eligible visible text blocks were found in the current viewport.";
+  } else if (!findings) {
+    els.summaryDetail.textContent = `${count} ${candidateLabel} from the current viewport are ready for Gemma 4 review.`;
+  } else if (findings.length === 0) {
+    els.summaryDetail.textContent = `Gemma 4 reviewed ${count} ${candidateLabel} from the current viewport and found no localization issues.`;
+  } else {
+    els.summaryDetail.textContent = `Gemma 4 reviewed ${count} ${candidateLabel}; ${safeCount} safely actionable and ${reviewCount} ${
+      reviewCount === 1 ? "needs" : "need"
+    } manual review. Every finding requires human review before Apply.`;
+  }
+
+  els.partialBanner.hidden = !partial;
+  if (partial) {
+    const omitted = Math.max(totalEligible - count, 0);
+    els.partialDetail.textContent =
+      `${count} of ${totalEligible} eligible text blocks were sent to Gemma 4.` +
+      (omitted > 0
+        ? ` ${omitted} were not reviewed; findings do not cover them.`
+        : " The scanner reported a partial result.");
+  } else {
+    els.partialDetail.textContent = "";
+  }
+
+  if (findings && findings.length > 0) {
+    const categoryCounts = { untranslated: 0, quality: 0, other: 0 };
+    findings.forEach((finding) => {
+      const group = CATEGORY_GROUP_BY_CATEGORY[finding.category] || "other";
+      categoryCounts[group] += 1;
+    });
+
+    els.categoryUntranslated.textContent = String(categoryCounts.untranslated);
+    els.categoryQuality.textContent = String(categoryCounts.quality);
+    els.categoryOther.textContent = String(categoryCounts.other);
+    els.categorySummary.hidden = false;
+  } else {
+    els.categorySummary.hidden = true;
+  }
+}
+
 function renderResults(result, screenshot) {
   const count = result.candidates.length;
 
@@ -525,22 +654,25 @@ function renderResults(result, screenshot) {
   els.screenshotPreview.src = screenshot;
   els.screenshotPreview.hidden = false;
   els.screenshotCaption.textContent =
-    "Viewport screenshot (not full page). Sent to your configured Gemma 4 endpoint for analysis.";
+    "Viewport screenshot sent with the visible text to your configured Gemma 4 endpoint. It does not verify content below the fold.";
+
+  renderScanSummary(result, null);
 
   if (count === 0) {
     els.resultSummary.textContent =
-      "No eligible visible text blocks were found in this viewport. Scroll to some page text and scan again.";
+      "No eligible visible text blocks were found in the current viewport. Scroll to some page text and scan again.";
     els.candidateList.replaceChildren();
     els.resultMore.hidden = true;
     els.resultMore.textContent = "";
     return;
   }
 
-  const totalText =
-    result.totalEligible > count
-      ? ` Showing the first ${count} of ${result.totalEligible} eligible text blocks.`
-      : "";
-  els.resultSummary.textContent = `Text extracted from the current viewport.${totalText}`;
+  const totalText = isPartialScan(result)
+    ? result.totalEligible > count
+      ? ` Only the first ${count} of ${result.totalEligible} eligible text blocks were sent.`
+      : ` The scanner reported a partial result even though ${count} eligible text blocks were sent.`
+    : ` All ${count} eligible text blocks in the current viewport were sent.`;
+  els.resultSummary.textContent = `Visible text extracted from the current viewport.${totalText}`;
 
   const preview = result.candidates.slice(0, PREVIEW_LIMIT);
   const fragment = document.createDocumentFragment();
@@ -582,20 +714,36 @@ function renderResults(result, screenshot) {
 
 function renderFindings(analysis) {
   const count = analysis.findings.length;
+  const safeCount = countSafeFindings(analysis.findings);
+  const reviewCount = count - safeCount;
+
+  state.lastAnalysis = analysis;
+  state.skippedCandidateIds.clear();
+  renderScanSummary(state.lastScan, analysis);
 
   els.findings.hidden = false;
   els.findingCount.textContent = `${count} ${count === 1 ? "finding" : "findings"}`;
+  els.reviewBanner.hidden = count === 0;
 
-  const reviewedBy = analysis.model ? ` Reviewed by ${analysis.model}.` : "";
+  const reviewedBy = analysis.model ? `Reviewed by ${analysis.model}.` : "Reviewed.";
   els.findingsSummary.textContent =
     count === 0
-      ? `${reviewedBy} No issues were justified by the screenshot and candidate text.`.trim()
-      : `${reviewedBy} Suggestions only. Review each finding before changing the page.`.trim();
+      ? `${reviewedBy} No localization issues were justified by the screenshot and candidate text.`
+      : `${reviewedBy} ${safeCount} safely actionable, ${reviewCount} ${
+          reviewCount === 1 ? "needs" : "need"
+        } manual review. All suggestions require human review before Apply.`;
 
   els.findingsList.replaceChildren();
 
   if (count === 0) {
     els.findingsEmpty.hidden = false;
+    const candidateCount = state.lastScan?.candidates.length;
+    els.findingsEmpty.textContent =
+      typeof candidateCount === "number"
+        ? `Gemma 4 did not identify any localization issues in the ${candidateCount} ${
+            candidateCount === 1 ? "candidate" : "candidates"
+          } reviewed.`
+        : "Gemma 4 did not identify any localization issues in the candidates reviewed.";
     return;
   }
 
@@ -609,10 +757,36 @@ function renderFindings(analysis) {
   els.findingsList.append(fragment);
 }
 
+function createFindingField(labelText, className, value, options = {}) {
+  const field = document.createElement("div");
+  field.className = "finding-field";
+
+  const label = document.createElement("span");
+  label.className = "field-label";
+  label.textContent = labelText;
+
+  const text = document.createElement("p");
+  text.className = className;
+  text.dir = "auto";
+  text.textContent = value;
+  if (options.lang) {
+    text.lang = options.lang;
+  }
+  if (options.empty) {
+    text.dataset.empty = "true";
+  }
+
+  field.append(label, text);
+  return { field, text };
+}
+
 function buildFindingItem(finding) {
+  const canApply = isSafeFinding(finding);
+
   const item = document.createElement("li");
   item.className = "finding";
   item.dataset.severity = finding.severity;
+  item.dataset.candidateId = finding.candidateId;
 
   const head = document.createElement("div");
   head.className = "finding-head";
@@ -625,35 +799,40 @@ function buildFindingItem(finding) {
   category.className = "finding-category";
   category.textContent = CATEGORY_LABELS[finding.category];
 
-  head.append(severity, category);
+  const actionability = document.createElement("span");
+  actionability.className = `finding-actionability ${
+    canApply ? "actionability-safe" : "actionability-review"
+  }`;
+  actionability.textContent = canApply
+    ? "Safe to apply"
+    : finding.suggestedText
+      ? "Manual review only"
+      : "No safe suggestion";
 
-  const original = document.createElement("p");
-  original.className = "finding-original";
-  original.dir = "auto";
-  original.textContent = finding.originalText;
+  head.append(severity, category, actionability);
 
-  const suggested = document.createElement("p");
-  suggested.className = "finding-suggested";
-  suggested.dir = "auto";
-  if (finding.suggestedText) {
-    suggested.lang = "mr";
-    suggested.textContent = finding.suggestedText;
-  } else {
-    suggested.textContent = "No automatic Marathi suggestion.";
-    suggested.dataset.empty = "true";
-  }
-
-  const explanation = document.createElement("p");
-  explanation.className = "finding-explanation";
-  explanation.textContent = finding.explanation;
-
-  const evidence = document.createElement("p");
-  evidence.className = "finding-evidence";
-  evidence.textContent = `Evidence: ${finding.evidence}`;
+  const original = createFindingField("Original text", "finding-original", finding.originalText);
+  const suggested = createFindingField(
+    "Suggested Marathi",
+    "finding-suggested",
+    finding.suggestedText || "No Marathi replacement was proposed.",
+    {
+      lang: finding.suggestedText ? "mr" : "",
+      empty: !finding.suggestedText,
+    }
+  );
+  const explanation = createFindingField(
+    "Why this was flagged",
+    "finding-explanation",
+    finding.explanation
+  );
+  const evidence = createFindingField("Evidence", "finding-evidence", finding.evidence);
 
   const review = document.createElement("p");
   review.className = "finding-review";
-  review.textContent = "Requires human review";
+  review.textContent = canApply
+    ? "Requires human review before Apply."
+    : "Requires human review; no safe automatic correction is available.";
 
   const actions = document.createElement("div");
   actions.className = "finding-actions";
@@ -663,16 +842,21 @@ function buildFindingItem(finding) {
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
 
-  if (!finding.suggestedText) {
-    status.textContent = "No Marathi replacement was proposed, so this finding cannot be applied.";
-  } else if (!finding.actionable) {
-    status.textContent =
-      "Not safely actionable: this text is part of nested or ambiguous content.";
+  if (!canApply) {
+    status.textContent = !finding.suggestedText
+      ? "No Marathi replacement was proposed, so this finding cannot be applied."
+      : "Not safely actionable: this text is part of nested or ambiguous content.";
+    status.dataset.tone = "idle";
   } else {
     const applyButton = document.createElement("button");
     applyButton.type = "button";
     applyButton.className = "correction-button";
     applyButton.textContent = "Apply correction";
+
+    const skipButton = document.createElement("button");
+    skipButton.type = "button";
+    skipButton.className = "skip-button";
+    skipButton.textContent = "Skip";
 
     const undoButton = document.createElement("button");
     undoButton.type = "button";
@@ -681,21 +865,57 @@ function buildFindingItem(finding) {
     undoButton.hidden = true;
 
     applyButton.addEventListener("click", () => {
-      void handleApplyCorrection(finding, applyButton, undoButton, status);
+      void handleApplyCorrection(finding, applyButton, undoButton, skipButton, status);
+    });
+    skipButton.addEventListener("click", () => {
+      handleSkipCorrection(finding, applyButton, undoButton, skipButton, status);
     });
     undoButton.addEventListener("click", () => {
-      void handleUndoCorrection(finding, applyButton, undoButton, status);
+      void handleUndoCorrection(finding, applyButton, undoButton, skipButton, status);
     });
 
-    actions.append(applyButton, undoButton);
+    actions.append(applyButton, skipButton, undoButton);
+
+    if (state.skippedCandidateIds.has(finding.candidateId)) {
+      applyButton.hidden = true;
+      undoButton.hidden = true;
+      skipButton.textContent = "Review again";
+      skipButton.setAttribute("aria-pressed", "true");
+      setCorrectionStatus(
+        status,
+        "Skipped for this review. No page text was changed.",
+        "idle"
+      );
+    } else {
+      skipButton.setAttribute("aria-pressed", "false");
+      setCorrectionStatus(
+        status,
+        "Ready for human review. No page text has been changed.",
+        "idle"
+      );
+    }
   }
 
   actions.append(status);
-  item.append(head, original, suggested, explanation, evidence, review, actions);
+  item.append(
+    head,
+    original.field,
+    suggested.field,
+    explanation.field,
+    evidence.field,
+    review,
+    actions
+  );
   return item;
 }
 
-async function handleApplyCorrection(finding, applyButton, undoButton, statusElement) {
+async function handleApplyCorrection(
+  finding,
+  applyButton,
+  undoButton,
+  skipButton,
+  statusElement
+) {
   if (!state.activeTabId) {
     setCorrectionStatus(
       statusElement,
@@ -706,6 +926,7 @@ async function handleApplyCorrection(finding, applyButton, undoButton, statusEle
   }
 
   applyButton.disabled = true;
+  skipButton.disabled = true;
   applyButton.textContent = "Applying…";
   setCorrectionStatus(statusElement, "Applying the correction to the page…", "progress");
 
@@ -724,10 +945,15 @@ async function handleApplyCorrection(finding, applyButton, undoButton, statusEle
       );
     }
 
+    state.skippedCandidateIds.delete(finding.candidateId);
     applyButton.hidden = true;
     applyButton.disabled = false;
     undoButton.hidden = false;
     undoButton.disabled = false;
+    skipButton.hidden = true;
+    skipButton.disabled = false;
+    skipButton.textContent = "Skip";
+    skipButton.setAttribute("aria-pressed", "false");
     setCorrectionStatus(
       statusElement,
       "Correction applied temporarily. Undo restores the original text; reloading the page also removes it.",
@@ -735,12 +961,19 @@ async function handleApplyCorrection(finding, applyButton, undoButton, statusEle
     );
   } catch (error) {
     applyButton.disabled = false;
+    skipButton.disabled = false;
     applyButton.textContent = "Apply correction";
     setCorrectionStatus(statusElement, friendlyCorrectionError(error), "error");
   }
 }
 
-async function handleUndoCorrection(finding, applyButton, undoButton, statusElement) {
+async function handleUndoCorrection(
+  finding,
+  applyButton,
+  undoButton,
+  skipButton,
+  statusElement
+) {
   if (!state.activeTabId) {
     setCorrectionStatus(
       statusElement,
@@ -751,6 +984,7 @@ async function handleUndoCorrection(finding, applyButton, undoButton, statusElem
   }
 
   undoButton.disabled = true;
+  skipButton.disabled = true;
   undoButton.textContent = "Undoing…";
   setCorrectionStatus(statusElement, "Restoring the original page text…", "progress");
 
@@ -767,12 +1001,17 @@ async function handleUndoCorrection(finding, applyButton, undoButton, statusElem
       );
     }
 
+    state.skippedCandidateIds.delete(finding.candidateId);
     undoButton.hidden = true;
     undoButton.disabled = false;
     undoButton.textContent = "Undo correction";
     applyButton.hidden = false;
     applyButton.disabled = false;
     applyButton.textContent = "Apply correction";
+    skipButton.hidden = false;
+    skipButton.disabled = false;
+    skipButton.textContent = "Skip";
+    skipButton.setAttribute("aria-pressed", "false");
     setCorrectionStatus(
       statusElement,
       "Correction undone. The page's original text is restored.",
@@ -780,9 +1019,37 @@ async function handleUndoCorrection(finding, applyButton, undoButton, statusElem
     );
   } catch (error) {
     undoButton.disabled = false;
+    skipButton.disabled = false;
     undoButton.textContent = "Undo correction";
     setCorrectionStatus(statusElement, friendlyCorrectionError(error), "error");
   }
+}
+
+function handleSkipCorrection(finding, applyButton, undoButton, skipButton, statusElement) {
+  if (state.skippedCandidateIds.has(finding.candidateId)) {
+    state.skippedCandidateIds.delete(finding.candidateId);
+    applyButton.hidden = false;
+    applyButton.disabled = false;
+    skipButton.textContent = "Skip";
+    skipButton.setAttribute("aria-pressed", "false");
+    setCorrectionStatus(
+      statusElement,
+      "Ready for human review. No page text has been changed.",
+      "idle"
+    );
+    return;
+  }
+
+  state.skippedCandidateIds.add(finding.candidateId);
+  applyButton.hidden = true;
+  undoButton.hidden = true;
+  skipButton.textContent = "Review again";
+  skipButton.setAttribute("aria-pressed", "true");
+  setCorrectionStatus(
+    statusElement,
+    "Skipped for this review. No page text was changed.",
+    "idle"
+  );
 }
 
 function setCorrectionStatus(element, message, tone) {
@@ -806,6 +1073,25 @@ function friendlyCorrectionError(error) {
 
 function resetResults() {
   state.activeTabId = null;
+  state.lastScan = null;
+  state.lastAnalysis = null;
+  state.skippedCandidateIds.clear();
+
+  els.scanSummary.hidden = true;
+  els.summaryCandidates.textContent = "0";
+  els.summaryFindings.textContent = "—";
+  els.summaryActionable.textContent = "—";
+  els.summaryReview.textContent = "—";
+  els.summaryDetail.textContent = "";
+  els.scanCompleteness.textContent = "Viewport scan";
+  els.scanCompleteness.dataset.tone = "idle";
+  els.partialBanner.hidden = true;
+  els.partialDetail.textContent = "";
+  els.categorySummary.hidden = true;
+  els.categoryUntranslated.textContent = "0";
+  els.categoryQuality.textContent = "0";
+  els.categoryOther.textContent = "0";
+
   els.results.hidden = true;
   els.candidateCount.textContent = "0 candidates";
   els.resultSummary.textContent = "";
@@ -820,13 +1106,16 @@ function resetResults() {
   els.findings.hidden = true;
   els.findingCount.textContent = "0 findings";
   els.findingsSummary.textContent = "";
+  els.reviewBanner.hidden = true;
   els.findingsList.replaceChildren();
   els.findingsEmpty.hidden = true;
+  els.findingsEmpty.textContent = "";
 }
 
 function setStatus(message, tone) {
   els.status.textContent = message;
   els.status.dataset.tone = tone;
+  els.statusRow.dataset.tone = tone;
   els.statusSpinner.hidden = tone !== "progress";
 }
 
