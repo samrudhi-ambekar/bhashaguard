@@ -1,6 +1,7 @@
 "use strict";
 
 const SCAN_MESSAGE_TYPE = "BHASHAGUARD_SCAN";
+const APPLY_MESSAGE_TYPE = "BHASHAGUARD_APPLY";
 const ANALYSIS_ENDPOINT = "http://127.0.0.1:8787/analyze";
 const ANALYSIS_TIMEOUT_MS = 120_000;
 const PREVIEW_LIMIT = 8;
@@ -20,6 +21,19 @@ const SEVERITY_LABELS = {
   low: "Low",
   medium: "Medium",
   high: "High",
+};
+
+const CORRECTION_ERROR_MESSAGES = {
+  UNKNOWN_CANDIDATE: "This candidate is no longer available. Scan the page again.",
+  NOT_ACTIONABLE: "This text cannot be changed safely because it is part of nested content.",
+  MISMATCHED_ORIGINAL: "The proposed correction does not match the scanned text. Scan again.",
+  INVALID_REPLACEMENT: "The proposed replacement is not valid plain text.",
+  STALE_TARGET: "The target element was removed or replaced. Scan the page again.",
+  TEXT_CHANGED: "The page text changed after scanning. Scan again before applying.",
+  UNSAFE_TARGET: "This text can no longer be mapped to one safe text node.",
+  ALREADY_APPLIED: "This correction is already applied.",
+  APPLY_FAILED: "The page did not accept the correction.",
+  APPLY_UNAVAILABLE: "Safe correction support is unavailable on this page. Reload it and scan again.",
 };
 
 const ANALYSIS_ERROR_MESSAGES = {
@@ -67,6 +81,7 @@ const state = {
   scanning: false,
   pageBlocked: false,
   screenshotDataUrl: null,
+  activeTabId: null,
 };
 
 class ScanError extends Error {
@@ -138,6 +153,7 @@ async function handleScanClick() {
       );
     }
 
+    state.activeTabId = tab.id;
     setStatus("Capturing the visible viewport…", "progress");
     const screenshot = await captureViewport(tab);
     state.screenshotDataUrl = screenshot;
@@ -257,7 +273,7 @@ async function ensureScannerInjected(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content.js"],
+      files: ["correction-core.js", "content.js"],
     });
   } catch (error) {
     console.warn("[BhashaGuard] Could not inject the scanner.", error);
@@ -302,6 +318,7 @@ function validateScanResponse(response) {
       id: candidate.id,
       text: candidate.text,
       tag: typeof candidate.tag === "string" ? candidate.tag : "",
+      actionable: candidate.actionable === true,
     }));
 
   const reportedTotal = Number.isInteger(response.totalEligible)
@@ -469,6 +486,7 @@ function validateAnalysisResponse(body, candidates) {
       evidence,
       explanation,
       requiresHumanReview: true,
+      actionable: candidate.actionable === true,
     });
   }
 
@@ -633,11 +651,98 @@ function buildFindingItem(finding) {
   review.className = "finding-review";
   review.textContent = "Requires human review";
 
-  item.append(head, original, suggested, explanation, evidence, review);
+  const actions = document.createElement("div");
+  actions.className = "finding-actions";
+
+  const status = document.createElement("p");
+  status.className = "correction-status";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+
+  if (!finding.suggestedText) {
+    status.textContent = "No Marathi replacement was proposed, so this finding cannot be applied.";
+  } else if (!finding.actionable) {
+    status.textContent =
+      "Not safely actionable: this text is part of nested or ambiguous content.";
+  } else {
+    const applyButton = document.createElement("button");
+    applyButton.type = "button";
+    applyButton.className = "correction-button";
+    applyButton.textContent = "Apply correction";
+    applyButton.addEventListener("click", () => {
+      void handleApplyCorrection(finding, applyButton, status);
+    });
+    actions.append(applyButton);
+  }
+
+  actions.append(status);
+  item.append(head, original, suggested, explanation, evidence, review, actions);
   return item;
 }
 
+async function handleApplyCorrection(finding, applyButton, statusElement) {
+  if (!state.activeTabId) {
+    setCorrectionStatus(
+      statusElement,
+      "The scanned tab is no longer available. Reopen the popup and scan again.",
+      "error"
+    );
+    return;
+  }
+
+  applyButton.disabled = true;
+  applyButton.textContent = "Applying…";
+  setCorrectionStatus(statusElement, "Applying the correction to the page…", "progress");
+
+  try {
+    const response = await chrome.tabs.sendMessage(state.activeTabId, {
+      type: APPLY_MESSAGE_TYPE,
+      candidateId: finding.candidateId,
+      originalText: finding.originalText,
+      replacementText: finding.suggestedText,
+    });
+
+    if (!response || response.ok !== true) {
+      const code = typeof response?.code === "string" ? response.code : "";
+      throw new ScanError(
+        CORRECTION_ERROR_MESSAGES[code] || "The correction was not applied to the page."
+      );
+    }
+
+    applyButton.hidden = true;
+    setCorrectionStatus(
+      statusElement,
+      "Correction applied temporarily. Reloading the page restores the original text.",
+      "success"
+    );
+  } catch (error) {
+    applyButton.disabled = false;
+    applyButton.textContent = "Apply correction";
+    setCorrectionStatus(statusElement, friendlyCorrectionError(error), "error");
+  }
+}
+
+function setCorrectionStatus(element, message, tone) {
+  element.textContent = message;
+  element.dataset.tone = tone;
+}
+
+function friendlyCorrectionError(error) {
+  if (error instanceof ScanError) {
+    return error.message;
+  }
+
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  if (/context invalidated|extension context/i.test(raw)) {
+    return "The extension was reloaded. Close and reopen this popup, then scan again.";
+  }
+
+  console.warn("[BhashaGuard] Could not apply the correction.", error);
+  return "The correction could not be applied. Reload the page and scan again.";
+}
+
 function resetResults() {
+  state.activeTabId = null;
   els.results.hidden = true;
   els.candidateCount.textContent = "0 candidates";
   els.resultSummary.textContent = "";

@@ -482,6 +482,60 @@ body {
   font-weight: 700;
 }
 
+.finding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed #e6eaf2;
+}
+
+.correction-button {
+  padding: 6px 10px;
+  border: 1px solid #c4d4eb;
+  border-radius: 8px;
+  background: #eef4fd;
+  color: var(--brand);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.correction-button:hover:not(:disabled) {
+  border-color: #9db8dd;
+  background: #e3edfb;
+}
+
+.correction-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.correction-status {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.correction-status[data-tone="success"] {
+  color: var(--success);
+  font-weight: 650;
+}
+
+.correction-status[data-tone="error"] {
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.correction-status[data-tone="progress"] {
+  color: var(--brand-bright);
+  font-weight: 650;
+}
+
 .analysis-notice {
   display: grid;
   grid-template-columns: auto 1fr;

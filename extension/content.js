@@ -8,6 +8,7 @@
   window[INSTALL_FLAG] = true;
 
   const SCAN_MESSAGE_TYPE = "BHASHAGUARD_SCAN";
+  const APPLY_MESSAGE_TYPE = "BHASHAGUARD_APPLY";
   const MIN_TEXT_LENGTH = 2;
   const MAX_TEXT_LENGTH = 320;
   const MAX_CANDIDATES = 40;
@@ -40,19 +41,62 @@
   const registry = new Map();
   let nextCandidateNumber = 1;
 
+  const correctionManager = globalThis.BhashaGuardCorrection?.createCorrectionManager?.({
+    resolveCandidate: (candidateId) => registry.get(candidateId) || null,
+    isSafeTarget: isActionableTextNode,
+  });
+
+  if (!correctionManager) {
+    console.error("[BhashaGuard] The correction core did not load.");
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!message || message.type !== SCAN_MESSAGE_TYPE) {
+    if (!message || typeof message.type !== "string") {
       return false;
     }
 
-    try {
-      sendResponse({ ok: true, ...scanViewport() });
-    } catch (error) {
-      console.error("[BhashaGuard] Visible text scan failed.", error);
-      sendResponse({
-        ok: false,
-        error: "The visible text scan could not complete on this page.",
-      });
+    if (message.type === SCAN_MESSAGE_TYPE) {
+      try {
+        sendResponse({ ok: true, ...scanViewport() });
+      } catch (error) {
+        console.error("[BhashaGuard] Visible text scan failed.", error);
+        sendResponse({
+          ok: false,
+          error: "The visible text scan could not complete on this page.",
+        });
+      }
+
+      return false;
+    }
+
+    if (message.type === APPLY_MESSAGE_TYPE) {
+      if (!correctionManager) {
+        sendResponse({
+          ok: false,
+          code: "APPLY_UNAVAILABLE",
+          message: "Safe correction support is unavailable on this page.",
+        });
+        return false;
+      }
+
+      try {
+        sendResponse(
+          correctionManager.apply({
+            candidateId: message.candidateId,
+            originalText: message.originalText,
+            replacementText: message.replacementText,
+          })
+        );
+      } catch (error) {
+        console.error("[BhashaGuard] Correction application failed.", error);
+        sendResponse({
+          ok: false,
+          code: "APPLY_FAILED",
+          message: "The correction could not be applied.",
+        });
+      }
+
+      return false;
     }
 
     return false;
@@ -104,10 +148,12 @@
       }
 
       const id = getNodeId(node);
+      const actionable = isActionableTextNode(node);
       const candidate = {
         id,
         text,
         tag: parent.tagName.toLowerCase(),
+        actionable,
         rect: {
           x: Math.round(rect.left),
           y: Math.round(rect.top),
@@ -116,7 +162,12 @@
         },
       };
 
-      registry.set(id, { node, text });
+      registry.set(id, {
+        node,
+        text,
+        originalNodeValue: node.nodeValue,
+        actionable,
+      });
       candidates.push(candidate);
     }
 
@@ -139,6 +190,33 @@
       return false;
     }
     return /[\p{L}\p{N}]/u.test(text);
+  }
+
+  function isActionableTextNode(node) {
+    if (!node || node.nodeType !== Node.TEXT_NODE || !node.isConnected) {
+      return false;
+    }
+
+    const parent = node.parentElement;
+    if (!parent || !parent.isConnected || parent.closest(EXCLUDED_SELECTOR)) {
+      return false;
+    }
+
+    if (parent.isContentEditable || parent.children.length !== 0) {
+      return false;
+    }
+
+    const nonEmptyTextNodes = [];
+    for (const child of parent.childNodes) {
+      if (
+        child.nodeType === Node.TEXT_NODE &&
+        normalizeText(child.nodeValue || "").length > 0
+      ) {
+        nonEmptyTextNodes.push(child);
+      }
+    }
+
+    return nonEmptyTextNodes.length === 1 && nonEmptyTextNodes[0] === node;
   }
 
   function getVisibleRect(element, viewport) {
