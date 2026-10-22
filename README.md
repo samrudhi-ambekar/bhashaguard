@@ -309,6 +309,8 @@ Current manual/exploratory record:
   stubbed Chrome APIs.
 
 ## Screenshots
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/361746ec-27c5-4510-b3e8-23a8bceafda9" />
+
 
 No verified product screenshots are committed to the repository yet. The screenshot
 milestone will add only real captures, with captions and without keys, private tabs, or
