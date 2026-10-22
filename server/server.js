@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
+import { AnalysisError, analyzeLocalization } from "./analyzer.js";
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(serverDirectory, ".env"), quiet: true });
@@ -23,7 +24,11 @@ const modelConfigured = Boolean(process.env.GEMINI_API_KEY?.trim());
 const EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
 const LOCAL_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d{1,5})?$/;
 
-export function createApp() {
+export function createApp({
+  runAnalysis = analyzeLocalization,
+  isModelConfigured = modelConfigured,
+  activeModel = model,
+} = {}) {
   const app = express();
 
   app.disable("x-powered-by");
@@ -37,12 +42,12 @@ export function createApp() {
       status: "ok",
       service: SERVICE_NAME,
       version: SERVICE_VERSION,
-      model,
-      modelConfigured,
+      model: activeModel,
+      modelConfigured: isModelConfigured,
     });
   });
 
-  app.post("/analyze", requireJsonContentType, (request, response) => {
+  app.post("/analyze", requireJsonContentType, async (request, response) => {
     const validation = validateAnalyzeRequest(request.body);
     if (!validation.ok) {
       return sendError(
@@ -54,7 +59,7 @@ export function createApp() {
       );
     }
 
-    if (!modelConfigured) {
+    if (!isModelConfigured) {
       return sendError(
         response,
         503,
@@ -63,12 +68,29 @@ export function createApp() {
       );
     }
 
-    return sendError(
-      response,
-      503,
-      "ANALYSIS_NOT_IMPLEMENTED",
-      "Gemma 4 analysis is not connected yet."
-    );
+    try {
+      const result = await runAnalysis(validation.value);
+      return response.json({
+        ok: true,
+        model: result.model || activeModel,
+        findings: result.findings,
+        summary: result.summary,
+      });
+    } catch (error) {
+      if (error instanceof AnalysisError) {
+        const suffix = error.detail ? `: ${error.detail}` : "";
+        console.error(`[BhashaGuard] Analysis failed [${error.code}]${suffix}`);
+        return sendError(response, error.httpStatus, error.code, error.message);
+      }
+
+      console.error("[BhashaGuard] Analysis failed with an unexpected error:", error?.message || "unknown error");
+      return sendError(
+        response,
+        500,
+        "ANALYSIS_FAILED",
+        "The local server could not complete the analysis."
+      );
+    }
   });
 
   app.use((_request, response) => {

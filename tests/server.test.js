@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { once } from "node:events";
 import { createApp } from "../server/server.js";
+import { AnalysisError } from "../server/analyzer.js";
 
 const EXTENSION_ORIGIN = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const PNG_DATA_URL =
@@ -11,7 +12,7 @@ let server;
 let baseUrl;
 
 before(async () => {
-  server = createApp().listen(0, "127.0.0.1");
+  server = createApp({ isModelConfigured: false }).listen(0, "127.0.0.1");
   await once(server, "listening");
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -21,6 +22,17 @@ after(async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+async function withApp(app, run) {
+  const httpServer = app.listen(0, "127.0.0.1");
+  await once(httpServer, "listening");
+  const url = `http://127.0.0.1:${httpServer.address().port}`;
+  try {
+    return await run(url);
+  } finally {
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+}
 
 function validPayload(overrides = {}) {
   return {
@@ -126,8 +138,95 @@ test("POST /analyze validates a well-formed request without fabricating findings
 
   assert.equal(response.status, 503);
   assert.equal(body.ok, false);
-  assert.ok(["MODEL_NOT_CONFIGURED", "ANALYSIS_NOT_IMPLEMENTED"].includes(body.error.code));
+  assert.equal(body.error.code, "MODEL_NOT_CONFIGURED");
   assert.equal("findings" in body, false);
+});
+
+test("POST /analyze returns findings from the injected analysis implementation", async () => {
+  const expectedFindings = [
+    {
+      candidateId: "bg-test-1",
+      originalText: "Apply Now",
+      suggestedText: "आता अर्ज करा",
+      category: "untranslated",
+      evidence: "The call-to-action button is in English.",
+      explanation: "The surrounding page is Marathi, so this action label appears untranslated.",
+      severity: "high",
+      requiresHumanReview: true,
+    },
+  ];
+  let received;
+  let receivedUrl;
+
+  const app = createApp({
+    isModelConfigured: true,
+    activeModel: "test-gemma-model",
+    runAnalysis: async (value) => {
+      received = value;
+      return {
+        model: "test-gemma-model",
+        findings: expectedFindings,
+        summary: { candidateCount: value.candidates.length, findingCount: 1 },
+      };
+    },
+  });
+
+  await withApp(app, async (url) => {
+    receivedUrl = url;
+    const response = await fetch(`${url}/analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: EXTENSION_ORIGIN,
+      },
+      body: JSON.stringify(validPayload({ viewport: { width: 1280, height: 720 } })),
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("access-control-allow-origin"), EXTENSION_ORIGIN);
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.model, "test-gemma-model");
+    assert.deepEqual(body.findings, expectedFindings);
+    assert.deepEqual(body.summary, { candidateCount: 2, findingCount: 1 });
+  });
+
+  assert.ok(receivedUrl);
+  assert.equal(received.targetLanguage, "mr");
+  assert.equal(received.sessionId, "bg-test-session");
+  assert.equal(received.screenshot.mimeType, "image/png");
+  assert.ok(Buffer.isBuffer(received.screenshot.bytes));
+  assert.equal(received.candidates[0].text, "Apply Now");
+  assert.deepEqual(received.viewport, { width: 1280, height: 720 });
+});
+
+test("POST /analyze maps invalid model output to a safe structured error", async () => {
+  const app = createApp({
+    isModelConfigured: true,
+    runAnalysis: async () => {
+      throw new AnalysisError(
+        "INVALID_MODEL_RESPONSE",
+        "Gemma 4 returned an invalid analysis response. No findings were accepted.",
+        { detail: "findings[0].candidateId does not match a submitted candidate." }
+      );
+    },
+  });
+
+  await withApp(app, async (url) => {
+    const response = await fetch(`${url}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validPayload()),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, "INVALID_MODEL_RESPONSE");
+    assert.match(body.error.message, /No findings were accepted/);
+    assert.equal("details" in body.error, false);
+    assert.doesNotMatch(JSON.stringify(body), /candidateId does not match/);
+  });
 });
 
 test("CORS preflight allows a Chrome extension origin", async () => {
