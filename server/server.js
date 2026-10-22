@@ -70,6 +70,9 @@ export function createApp({
 
     try {
       const result = await runAnalysis(validation.value);
+      if (!result || !Array.isArray(result.findings)) {
+        throw new Error("Analysis implementation returned an invalid result shape.");
+      }
       return response.json({
         ok: true,
         model: result.model || activeModel,
