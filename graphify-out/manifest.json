@@ -1,0 +1,146 @@
+{
+  "extension/content.js": {
+    "mtime": 1792668949.9558244,
+    "seen": 1792669273.0952659,
+    "ast_hash": "0c9ae61e2e758c79a772c681feab29b2",
+    "semantic_hash": ""
+  },
+  "extension/manifest.json": {
+    "mtime": 1792667098.9185483,
+    "seen": 1792667224.8579378,
+    "ast_hash": "fa2265b2553326b902e768f55fa14582",
+    "semantic_hash": ""
+  },
+  "extension/popup.js": {
+    "mtime": 1792671244.3809936,
+    "seen": 1792671288.7297084,
+    "ast_hash": "fb0c890af0a4844260c831bb1d250437",
+    "semantic_hash": ""
+  },
+  "server/package.json": {
+    "mtime": 1792664872.79722,
+    "seen": 1792664894.7127185,
+    "ast_hash": "c461616bdf60394a5432dd165234854b",
+    "semantic_hash": ""
+  },
+  "server/server.js": {
+    "mtime": 1792666837.3403075,
+    "seen": 1792667224.8579736,
+    "ast_hash": "4b6b61067196827f1d646481589cb518",
+    "semantic_hash": ""
+  },
+  "tests/localization-cases.json": {
+    "mtime": 1792655874.405661,
+    "seen": 1792662123.8693116,
+    "ast_hash": "58e0494c51d30eb3494f7c9198986bb9",
+    "semantic_hash": ""
+  },
+  "tests/server.test.js": {
+    "mtime": 1792665935.0572574,
+    "seen": 1792667224.8579924,
+    "ast_hash": "eff975520657cb7db3f7a849708ab334",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1792662076.507431,
+    "seen": 1792662123.8693192,
+    "ast_hash": "bff86391e6c291ee9d4d8bab7034e450",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1792655874.359659,
+    "seen": 1792662123.8693228,
+    "ast_hash": "fd73f21ee01ab457f94bda971cc5f3d7",
+    "semantic_hash": ""
+  },
+  "demo/index.html": {
+    "mtime": 1792657797.5924256,
+    "seen": 1792662123.8693266,
+    "ast_hash": "4eeec48d67aec73e9a63d2b17c3721e6",
+    "semantic_hash": ""
+  },
+  "docs/architecture.md": {
+    "mtime": 1792655874.3496585,
+    "seen": 1792662123.8693302,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "docs/demo-script.md": {
+    "mtime": 1792655874.3496585,
+    "seen": 1792662123.8693345,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "docs/evaluation.md": {
+    "mtime": 1792670406.4794135,
+    "seen": 1792670426.566829,
+    "ast_hash": "586025ee8f9f5fbc6757364dced52638",
+    "semantic_hash": ""
+  },
+  "docs/privacy.md": {
+    "mtime": 1792655874.3496585,
+    "seen": 1792662123.8693419,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "extension/popup.html": {
+    "mtime": 1792671203.9609685,
+    "seen": 1792671288.7298002,
+    "ast_hash": "66a2182302c4f7119b19190cc4703e8c",
+    "semantic_hash": ""
+  },
+  "server/scripts/model-smoke-test.js": {
+    "mtime": 1792664854.9376373,
+    "seen": 1792664894.712725,
+    "ast_hash": "3a0234471446419c9275c1f9f7f336b2",
+    "semantic_hash": ""
+  },
+  "server/README.md": {
+    "mtime": 1792664935.9422343,
+    "seen": 1792667224.8580523,
+    "ast_hash": "011ed6e75dd0cc296f43c0bdf03bd300",
+    "semantic_hash": ""
+  },
+  "server/analyzer.js": {
+    "mtime": 1792666197.116815,
+    "seen": 1792667224.8579524,
+    "ast_hash": "67f7fc307afa7579c66637964e6aa898",
+    "semantic_hash": ""
+  },
+  "tests/analyzer.test.js": {
+    "mtime": 1792665942.3392396,
+    "seen": 1792667224.857979,
+    "ast_hash": "b1d6711e726a95df122c6bd9f45a8f93",
+    "semantic_hash": ""
+  },
+  "extension/correction-core.js": {
+    "mtime": 1792668936.5427365,
+    "seen": 1792669273.095277,
+    "ast_hash": "060f77bbabef99502e231f04236b9f4c",
+    "semantic_hash": ""
+  },
+  "tests/browser/integration.test.js": {
+    "mtime": 1792671043.5468016,
+    "seen": 1792671288.729737,
+    "ast_hash": "07d27f44b486aee886eb78108805a906",
+    "semantic_hash": ""
+  },
+  "tests/correction-core.test.js": {
+    "mtime": 1792668997.1961453,
+    "seen": 1792669273.095347,
+    "ast_hash": "27d19d103ea14aa23b40e05a0dd95acf",
+    "semantic_hash": ""
+  },
+  "tests/browser/content-integration.html": {
+    "mtime": 1792669172.09033,
+    "seen": 1792669273.0954292,
+    "ast_hash": "30107feb153d4bdcab115e2c5febf464",
+    "semantic_hash": ""
+  },
+  "tests/browser/popup-integration.html": {
+    "mtime": 1792671024.2632883,
+    "seen": 1792671288.7298138,
+    "ast_hash": "911dd81ba10422afae107b8c03405437",
+    "semantic_hash": ""
+  }
+}
