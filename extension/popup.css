@@ -361,6 +361,127 @@ body {
   font-size: 10.5px;
 }
 
+.findings {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.finding-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.finding {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid #edf0f6;
+  border-left: 3px solid #9aa8bd;
+  border-radius: 8px;
+  background: #fafbfe;
+}
+
+.finding[data-severity="high"] {
+  border-left-color: var(--danger);
+}
+
+.finding[data-severity="medium"] {
+  border-left-color: #b97900;
+}
+
+.finding[data-severity="low"] {
+  border-left-color: var(--success);
+}
+
+.finding-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.severity {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.severity-high {
+  background: #fdeceb;
+  color: var(--danger);
+}
+
+.severity-medium {
+  background: #fff5db;
+  color: #80530a;
+}
+
+.severity-low {
+  background: #eaf7f0;
+  color: var(--success);
+}
+
+.finding-category {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.finding-original {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.finding-suggested {
+  margin: 0;
+  color: #1b4b91;
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.finding-suggested[data-empty="true"] {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: italic;
+  font-weight: 500;
+}
+
+.finding-explanation,
+.finding-evidence,
+.finding-review {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.finding-evidence {
+  padding-top: 4px;
+  border-top: 1px dashed #e6eaf2;
+}
+
+.finding-review {
+  color: var(--warning);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
 .analysis-notice {
   display: grid;
   grid-template-columns: auto 1fr;

@@ -1,8 +1,47 @@
 "use strict";
 
 const SCAN_MESSAGE_TYPE = "BHASHAGUARD_SCAN";
+const ANALYSIS_ENDPOINT = "http://127.0.0.1:8787/analyze";
+const ANALYSIS_TIMEOUT_MS = 120_000;
 const PREVIEW_LIMIT = 8;
 const MAX_ERROR_LENGTH = 180;
+const MAX_FINDING_TEXT_LENGTH = 1_200;
+
+const CATEGORY_LABELS = {
+  untranslated: "Untranslated",
+  mixed_language: "Mixed language",
+  incomplete_translation: "Incomplete translation",
+  inconsistent_terminology: "Inconsistent terminology",
+  unnatural_wording: "Unnatural wording",
+  other: "Other",
+};
+
+const SEVERITY_LABELS = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+
+const ANALYSIS_ERROR_MESSAGES = {
+  MODEL_NOT_CONFIGURED:
+    "Gemma 4 is not configured on the local server. Add GEMINI_API_KEY to server/.env and restart the server.",
+  MODEL_AUTH_FAILED:
+    "The local server could not authenticate with the Gemma API. Check the key in server/.env.",
+  MODEL_RATE_LIMITED:
+    "Gemma 4 is temporarily rate-limited by the API. Wait a moment and try again.",
+  MODEL_UNAVAILABLE:
+    "The configured Gemma model is not available to this API key. Check GEMMA_MODEL in server/.env.",
+  MODEL_REQUEST_REJECTED:
+    "Gemma 4 rejected the analysis request. Check the server log and try again.",
+  MODEL_NETWORK_ERROR:
+    "The local server could not reach the Gemma API. Check the network connection and try again.",
+  INVALID_MODEL_RESPONSE:
+    "Gemma 4 returned a response that failed BhashaGuard's validation. No findings were shown.",
+  INVALID_REQUEST:
+    "The local server rejected the scan data. Reload the page and try again.",
+  PAYLOAD_TOO_LARGE:
+    "The viewport screenshot was too large for the local server. Resize the window and try again.",
+};
 
 const els = {
   hostname: document.getElementById("hostname"),
@@ -17,6 +56,11 @@ const els = {
   resultMore: document.getElementById("result-more"),
   screenshotPreview: document.getElementById("screenshot-preview"),
   screenshotCaption: document.getElementById("screenshot-caption"),
+  findings: document.getElementById("findings"),
+  findingCount: document.getElementById("finding-count"),
+  findingsSummary: document.getElementById("findings-summary"),
+  findingsList: document.getElementById("findings-list"),
+  findingsEmpty: document.getElementById("findings-empty"),
 };
 
 const state = {
@@ -110,16 +154,32 @@ async function handleScanClick() {
         "Scan complete, but no eligible visible text was found in this viewport.",
         "warning"
       );
-    } else {
-      const count = result.candidates.length;
-      const candidateLabel = count === 1 ? "candidate" : "candidates";
-      const truncation = result.truncated
-        ? ` (first ${count} of ${result.totalEligible})`
-        : "";
-      setStatus(
-        `Scan complete. ${count} text ${candidateLabel} extracted${truncation}.`,
-        "success"
-      );
+      return;
+    }
+
+    const count = result.candidates.length;
+    const candidateLabel = count === 1 ? "candidate" : "candidates";
+    setStatus(`Sending the screenshot and ${count} ${candidateLabel} to Gemma 4…`, "progress");
+    els.scanButtonLabel.textContent = "Analyzing with Gemma 4…";
+
+    try {
+      const analysis = await requestAnalysis(result, screenshot);
+      renderFindings(analysis);
+
+      if (analysis.findings.length === 0) {
+        setStatus(
+          `Analysis complete. Gemma 4 found no localization issues in these ${count} ${candidateLabel}.`,
+          "success"
+        );
+      } else {
+        const findingLabel = analysis.findings.length === 1 ? "finding" : "findings";
+        setStatus(
+          `Analysis complete. ${analysis.findings.length} localization ${findingLabel} returned; all require human review.`,
+          "success"
+        );
+      }
+    } catch (error) {
+      setStatus(friendlyError(error), "error");
     }
   } catch (error) {
     resetResults();
@@ -248,11 +308,191 @@ function validateScanResponse(response) {
     ? response.totalEligible
     : candidates.length;
 
+  const sessionId =
+    typeof response.sessionId === "string" &&
+    response.sessionId.length > 0 &&
+    response.sessionId.length <= 128
+      ? response.sessionId
+      : `bg-${Date.now().toString(36)}`;
+
   return {
+    sessionId,
     candidates,
     totalEligible: Math.max(reportedTotal, candidates.length),
     truncated: response.truncated === true,
+    viewport: readViewport(response.viewport),
   };
+}
+
+function readViewport(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const width = Number(value.width);
+  const height = Number(value.height);
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    width > 20000 ||
+    height > 20000
+  ) {
+    return null;
+  }
+
+  return { width: Math.round(width), height: Math.round(height) };
+}
+
+async function requestAnalysis(scan, screenshot) {
+  const payload = {
+    sessionId: scan.sessionId,
+    targetLanguage: "mr",
+    screenshot: {
+      mimeType: "image/png",
+      dataUrl: screenshot,
+    },
+    candidates: scan.candidates.map(({ id, text, tag }) => ({ id, text, tag })),
+  };
+
+  if (scan.viewport) {
+    payload.viewport = scan.viewport;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch(ANALYSIS_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new ScanError(
+        "Gemma 4 analysis timed out. Check the local server and try again."
+      );
+    }
+    throw new ScanError(
+      "BhashaGuard could not reach its local analysis server. Start it with `cd server && npm start` and try again."
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    throw new ScanError(
+      "The local analysis server returned an unreadable response. No findings were shown."
+    );
+  }
+
+  if (!response.ok || body?.ok !== true) {
+    const code = typeof body?.error?.code === "string" ? body.error.code : "";
+    throw new ScanError(
+      ANALYSIS_ERROR_MESSAGES[code] ||
+        "The local analysis server could not complete the review. No findings were shown."
+    );
+  }
+
+  return validateAnalysisResponse(body, scan.candidates);
+}
+
+function validateAnalysisResponse(body, candidates) {
+  if (!Array.isArray(body.findings)) {
+    throw new ScanError(
+      "The local analysis server returned an unexpected result. No findings were shown."
+    );
+  }
+
+  if (body.findings.length > candidates.length) {
+    throw new ScanError(
+      "The local analysis server returned more findings than scanned candidates. No findings were shown."
+    );
+  }
+
+  const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const seenIds = new Set();
+  const findings = [];
+
+  for (let index = 0; index < body.findings.length; index += 1) {
+    const finding = body.findings[index];
+    if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
+      throw invalidFinding();
+    }
+
+    const candidate =
+      typeof finding.candidateId === "string" ? candidateById.get(finding.candidateId) : undefined;
+    if (!candidate || seenIds.has(candidate.id)) {
+      throw invalidFinding();
+    }
+    seenIds.add(candidate.id);
+
+    if (finding.originalText !== candidate.text) {
+      throw invalidFinding();
+    }
+
+    const category =
+      typeof finding.category === "string" ? finding.category.toLowerCase() : "";
+    const severity =
+      typeof finding.severity === "string" ? finding.severity.toLowerCase() : "";
+    if (!Object.hasOwn(CATEGORY_LABELS, category) || !Object.hasOwn(SEVERITY_LABELS, severity)) {
+      throw invalidFinding();
+    }
+
+    const evidence = plainFindingText(finding.evidence);
+    const explanation = plainFindingText(finding.explanation);
+    if (!evidence || !explanation) {
+      throw invalidFinding();
+    }
+
+    let suggestedText = null;
+    if (finding.suggestedText !== null && finding.suggestedText !== undefined) {
+      suggestedText = plainFindingText(finding.suggestedText);
+      if (!suggestedText) {
+        throw invalidFinding();
+      }
+    }
+
+    findings.push({
+      candidateId: candidate.id,
+      originalText: candidate.text,
+      suggestedText,
+      category,
+      severity,
+      evidence,
+      explanation,
+      requiresHumanReview: true,
+    });
+  }
+
+  const model = typeof body.model === "string" ? body.model.slice(0, 80) : "";
+  return { model, findings };
+}
+
+function invalidFinding() {
+  return new ScanError(
+    "Gemma 4 returned a finding that failed BhashaGuard's validation. No findings were shown."
+  );
+}
+
+function plainFindingText(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const text = value.trim();
+  if (text.length === 0 || text.length > MAX_FINDING_TEXT_LENGTH) {
+    return "";
+  }
+
+  return text;
 }
 
 function renderResults(result, screenshot) {
@@ -263,7 +503,7 @@ function renderResults(result, screenshot) {
   els.screenshotPreview.src = screenshot;
   els.screenshotPreview.hidden = false;
   els.screenshotCaption.textContent =
-    "Viewport screenshot (not full page). Held in memory only; never uploaded.";
+    "Viewport screenshot (not full page). Sent to your configured Gemma 4 endpoint for analysis.";
 
   if (count === 0) {
     els.resultSummary.textContent =
@@ -318,6 +558,85 @@ function renderResults(result, screenshot) {
   }
 }
 
+function renderFindings(analysis) {
+  const count = analysis.findings.length;
+
+  els.findings.hidden = false;
+  els.findingCount.textContent = `${count} ${count === 1 ? "finding" : "findings"}`;
+
+  const reviewedBy = analysis.model ? ` Reviewed by ${analysis.model}.` : "";
+  els.findingsSummary.textContent =
+    count === 0
+      ? `${reviewedBy} No issues were justified by the screenshot and candidate text.`.trim()
+      : `${reviewedBy} Suggestions only. Review each finding before changing the page.`.trim();
+
+  els.findingsList.replaceChildren();
+
+  if (count === 0) {
+    els.findingsEmpty.hidden = false;
+    return;
+  }
+
+  els.findingsEmpty.hidden = true;
+  const fragment = document.createDocumentFragment();
+
+  analysis.findings.forEach((finding) => {
+    fragment.append(buildFindingItem(finding));
+  });
+
+  els.findingsList.append(fragment);
+}
+
+function buildFindingItem(finding) {
+  const item = document.createElement("li");
+  item.className = "finding";
+  item.dataset.severity = finding.severity;
+
+  const head = document.createElement("div");
+  head.className = "finding-head";
+
+  const severity = document.createElement("span");
+  severity.className = `severity severity-${finding.severity}`;
+  severity.textContent = SEVERITY_LABELS[finding.severity];
+
+  const category = document.createElement("span");
+  category.className = "finding-category";
+  category.textContent = CATEGORY_LABELS[finding.category];
+
+  head.append(severity, category);
+
+  const original = document.createElement("p");
+  original.className = "finding-original";
+  original.dir = "auto";
+  original.textContent = finding.originalText;
+
+  const suggested = document.createElement("p");
+  suggested.className = "finding-suggested";
+  suggested.dir = "auto";
+  if (finding.suggestedText) {
+    suggested.lang = "mr";
+    suggested.textContent = finding.suggestedText;
+  } else {
+    suggested.textContent = "No automatic Marathi suggestion.";
+    suggested.dataset.empty = "true";
+  }
+
+  const explanation = document.createElement("p");
+  explanation.className = "finding-explanation";
+  explanation.textContent = finding.explanation;
+
+  const evidence = document.createElement("p");
+  evidence.className = "finding-evidence";
+  evidence.textContent = `Evidence: ${finding.evidence}`;
+
+  const review = document.createElement("p");
+  review.className = "finding-review";
+  review.textContent = "Requires human review";
+
+  item.append(head, original, suggested, explanation, evidence, review);
+  return item;
+}
+
 function resetResults() {
   els.results.hidden = true;
   els.candidateCount.textContent = "0 candidates";
@@ -328,7 +647,13 @@ function resetResults() {
   els.screenshotPreview.hidden = true;
   els.screenshotPreview.removeAttribute("src");
   els.screenshotCaption.textContent =
-    "Viewport screenshot held in memory only. Not uploaded.";
+    "Viewport screenshot sent with the visible text to your configured Gemma 4 endpoint.";
+
+  els.findings.hidden = true;
+  els.findingCount.textContent = "0 findings";
+  els.findingsSummary.textContent = "";
+  els.findingsList.replaceChildren();
+  els.findingsEmpty.hidden = true;
 }
 
 function setStatus(message, tone) {

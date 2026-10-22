@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "BhashaGuard",
   "version": "0.1.0",
-  "description": "Detect. Fix. Preview. Scan visible page text for a future Marathi localization review.",
+  "description": "Detect. Fix. Preview. Scan visible page text and request Marathi localization findings from a local Gemma 4 service.",
   "permissions": [
     "activeTab",
     "scripting"

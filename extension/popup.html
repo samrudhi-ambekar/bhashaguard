@@ -35,9 +35,9 @@
           </svg>
         </span>
         <p>
-          <strong>Private by design.</strong>
-          Nothing is read until you click. Only visible viewport text is collected; the viewport screenshot stays in
-          this popup's memory and is never uploaded. No page content is changed.
+          <strong>Nothing is read until you click.</strong>
+          The visible viewport text and a viewport screenshot are sent to your local BhashaGuard server for Gemma 4
+          analysis. Credentials stay on that server. No page content is changed.
         </p>
       </section>
 
@@ -75,16 +75,31 @@
             hidden
           />
           <figcaption id="screenshot-caption">
-            Viewport screenshot held in memory only. Not uploaded.
+            Viewport screenshot sent with the visible text to your configured Gemma 4 endpoint.
           </figcaption>
         </figure>
+      </section>
+
+      <section class="findings" id="findings" aria-labelledby="findings-heading" hidden>
+        <div class="results-head">
+          <h2 id="findings-heading">Localization findings</h2>
+          <span class="count-badge" id="finding-count">0 findings</span>
+        </div>
+        <p class="result-summary" id="findings-summary"></p>
+        <ol class="finding-list" id="findings-list"></ol>
+        <p class="result-more" id="findings-empty" hidden>
+          Gemma 4 did not identify any localization issues in these candidates.
+        </p>
       </section>
 
       <section class="analysis-notice" aria-label="Analysis status">
         <span class="analysis-dot" aria-hidden="true"></span>
         <div>
-          <h2>Gemma 4 analysis is not connected yet.</h2>
-          <p>This phase extracts visible text only. No translations or corrections are generated.</p>
+          <h2>Gemma 4 review</h2>
+          <p>
+            Findings are suggestions only. Every correction needs human review, and BhashaGuard never changes the
+            page automatically.
+          </p>
         </div>
       </section>
 
