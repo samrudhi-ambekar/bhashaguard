@@ -59,3 +59,11 @@ npm run smoke:model
 This sends one minimal text-only request to the configured Gemma model. It prints the
 model name and success/failure category, never the API key. The command exits nonzero on
 failure. API errors are reported with sanitized messages and HTTP status where available.
+
+## Verified connectivity
+
+- Date: 2026-10-22
+- Model: `gemma-4-26b-a4b-it`
+- Command: `npm run smoke:model`
+- Result: OK
+- Sanitized response: `BhashaGuard Gemma 4 connectivity OK`
