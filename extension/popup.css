@@ -513,6 +513,17 @@ body {
   opacity: 0.65;
 }
 
+.correction-undo {
+  border-color: #e6c9c6;
+  background: #fff4f2;
+  color: var(--danger);
+}
+
+.correction-undo:hover:not(:disabled) {
+  border-color: #d7a7a1;
+  background: #fdebea;
+}
+
 .correction-status {
   flex: 1 1 100%;
   margin: 0;

@@ -106,6 +106,59 @@
       return applications.has(candidateId);
     }
 
+    function undo({ candidateId } = {}) {
+      if (typeof candidateId !== "string" || !CANDIDATE_ID_PATTERN.test(candidateId)) {
+        return failure("NOT_APPLIED", "This correction is not currently applied.");
+      }
+
+      const application = applications.get(candidateId);
+      if (!application) {
+        return failure("NOT_APPLIED", "This correction is not currently applied.");
+      }
+
+      const node = application.node;
+      if (!node || node.nodeType !== 3) {
+        return failure("UNSAFE_TARGET", "The correction target is not a text node.");
+      }
+
+      if (node.isConnected !== true) {
+        return failure("STALE_TARGET", "The target element is no longer present on the page.");
+      }
+
+      if (!safeTargetCheck(node)) {
+        return failure(
+          "UNSAFE_TARGET",
+          "The target changed and can no longer be mapped to one safe text node."
+        );
+      }
+
+      if (node.nodeValue !== application.appliedNodeValue) {
+        return failure(
+          "TEXT_CHANGED",
+          "The page text changed after the correction was applied."
+        );
+      }
+
+      try {
+        node.nodeValue = application.originalNodeValue;
+      } catch {
+        return failure("UNDO_FAILED", "The page did not restore the original text.");
+      }
+
+      if (node.nodeValue !== application.originalNodeValue) {
+        return failure("UNDO_FAILED", "The page did not retain the original text.");
+      }
+
+      applications.delete(candidateId);
+
+      return {
+        ok: true,
+        code: "UNDONE",
+        candidateId,
+        restoredText: application.originalNodeValue,
+      };
+    }
+
     function hasApplicationForNode(node) {
       for (const application of applications.values()) {
         if (application.node === node) {
@@ -119,7 +172,7 @@
       return applications.size;
     }
 
-    return { apply, isApplied, appliedCount };
+    return { apply, undo, isApplied, appliedCount };
   }
 
   function validateReplacementText(value) {

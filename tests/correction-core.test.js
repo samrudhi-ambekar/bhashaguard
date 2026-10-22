@@ -313,3 +313,175 @@ test("validateReplacementText returns trimmed plain text only", () => {
   assert.equal(validateReplacementText(" <b>text</b> "), null);
   assert.equal(validateReplacementText("x".repeat(501)), null);
 });
+
+test("undo restores the exact original node value", () => {
+  const node = createTextNode("  Apply Now  ");
+  const candidate = createCandidate({ node, originalNodeValue: "  Apply Now  " });
+  const { manager } = createHarness(candidate);
+
+  assert.equal(
+    manager.apply({
+      candidateId: candidate.id,
+      originalText: "Apply Now",
+      replacementText: "आता अर्ज करा",
+    }).ok,
+    true
+  );
+
+  const result = manager.undo({ candidateId: candidate.id });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.code, "UNDONE");
+  assert.equal(node.nodeValue, "  Apply Now  ");
+  assert.equal(manager.isApplied(candidate.id), false);
+  assert.equal(manager.appliedCount(), 0);
+});
+
+test("undo refuses to overwrite text changed after apply", () => {
+  const node = createTextNode("Apply Now");
+  const candidate = createCandidate({ node });
+  const { manager } = createHarness(candidate);
+
+  assert.equal(
+    manager.apply({
+      candidateId: candidate.id,
+      originalText: "Apply Now",
+      replacementText: "आता अर्ज करा",
+    }).ok,
+    true
+  );
+
+  node.nodeValue = "आता अर्ज करा - edited";
+  const result = manager.undo({ candidateId: candidate.id });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "TEXT_CHANGED");
+  assert.equal(node.nodeValue, "आता अर्ज करा - edited");
+  assert.equal(manager.isApplied(candidate.id), true);
+});
+
+test("undo refuses to touch a target that was removed", () => {
+  const node = createTextNode("Apply Now");
+  const candidate = createCandidate({ node });
+  const { manager } = createHarness(candidate);
+
+  assert.equal(
+    manager.apply({
+      candidateId: candidate.id,
+      originalText: "Apply Now",
+      replacementText: "आता अर्ज करा",
+    }).ok,
+    true
+  );
+
+  node.isConnected = false;
+  const result = manager.undo({ candidateId: candidate.id });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "STALE_TARGET");
+  assert.equal(node.nodeValue, "आता अर्ज करा");
+});
+
+test("undo refuses an unsafe target", () => {
+  const node = createTextNode("Apply Now");
+  const candidate = createCandidate({ node });
+  const { manager } = createHarness(candidate);
+
+  assert.equal(
+    manager.apply({
+      candidateId: candidate.id,
+      originalText: "Apply Now",
+      replacementText: "आता अर्ज करा",
+    }).ok,
+    true
+  );
+
+  node.safe = false;
+  const result = manager.undo({ candidateId: candidate.id });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "UNSAFE_TARGET");
+  assert.equal(node.nodeValue, "आता अर्ज करा");
+});
+
+test("undo rejects unknown corrections and a second undo", () => {
+  const candidate = createCandidate();
+  const { manager } = createHarness(candidate);
+
+  assert.equal(manager.undo({ candidateId: "bg-test-unknown" }).code, "NOT_APPLIED");
+
+  assert.equal(
+    manager.apply({
+      candidateId: candidate.id,
+      originalText: "Apply Now",
+      replacementText: "आता अर्ज करा",
+    }).ok,
+    true
+  );
+  assert.equal(manager.undo({ candidateId: candidate.id }).ok, true);
+  assert.equal(manager.undo({ candidateId: candidate.id }).code, "NOT_APPLIED");
+  assert.equal(candidate.node.nodeValue, "Apply Now");
+});
+
+test("undo restores only the selected correction", () => {
+  const firstNode = createTextNode("Apply Now");
+  const secondNode = createTextNode("Download form");
+  const first = createCandidate({ id: "bg-test-1", node: firstNode });
+  const second = createCandidate({
+    id: "bg-test-2",
+    node: secondNode,
+    text: "Download form",
+    originalNodeValue: "Download form",
+  });
+  const { manager, candidates } = createHarness(first);
+  candidates.set(second.id, second);
+
+  assert.equal(
+    manager.apply({
+      candidateId: first.id,
+      originalText: "Apply Now",
+      replacementText: "आता अर्ज करा",
+    }).ok,
+    true
+  );
+  assert.equal(
+    manager.apply({
+      candidateId: second.id,
+      originalText: "Download form",
+      replacementText: "अर्ज डाउनलोड करा",
+    }).ok,
+    true
+  );
+
+  assert.equal(manager.undo({ candidateId: first.id }).ok, true);
+  assert.equal(firstNode.nodeValue, "Apply Now");
+  assert.equal(secondNode.nodeValue, "अर्ज डाउनलोड करा");
+  assert.equal(manager.isApplied(first.id), false);
+  assert.equal(manager.isApplied(second.id), true);
+  assert.equal(manager.appliedCount(), 1);
+});
+
+test("a correction can be applied again after undo", () => {
+  const candidate = createCandidate();
+  const { manager } = createHarness(candidate);
+
+  assert.equal(
+    manager.apply({
+      candidateId: candidate.id,
+      originalText: "Apply Now",
+      replacementText: "आता अर्ज करा",
+    }).ok,
+    true
+  );
+  assert.equal(manager.undo({ candidateId: candidate.id }).ok, true);
+
+  const result = manager.apply({
+    candidateId: candidate.id,
+    originalText: "Apply Now",
+    replacementText: "अर्ज सुरू करा",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(candidate.node.nodeValue, "अर्ज सुरू करा");
+  assert.equal(manager.appliedCount(), 1);
+});

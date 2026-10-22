@@ -2,6 +2,7 @@
 
 const SCAN_MESSAGE_TYPE = "BHASHAGUARD_SCAN";
 const APPLY_MESSAGE_TYPE = "BHASHAGUARD_APPLY";
+const UNDO_MESSAGE_TYPE = "BHASHAGUARD_UNDO";
 const ANALYSIS_ENDPOINT = "http://127.0.0.1:8787/analyze";
 const ANALYSIS_TIMEOUT_MS = 120_000;
 const PREVIEW_LIMIT = 8;
@@ -34,6 +35,9 @@ const CORRECTION_ERROR_MESSAGES = {
   ALREADY_APPLIED: "This correction is already applied.",
   APPLY_FAILED: "The page did not accept the correction.",
   APPLY_UNAVAILABLE: "Safe correction support is unavailable on this page. Reload it and scan again.",
+  NOT_APPLIED: "This correction is not currently applied.",
+  UNDO_FAILED: "The page did not restore the original text.",
+  UNDO_UNAVAILABLE: "Correction undo is unavailable on this page. Reload it and scan again.",
 };
 
 const ANALYSIS_ERROR_MESSAGES = {
@@ -669,10 +673,21 @@ function buildFindingItem(finding) {
     applyButton.type = "button";
     applyButton.className = "correction-button";
     applyButton.textContent = "Apply correction";
+
+    const undoButton = document.createElement("button");
+    undoButton.type = "button";
+    undoButton.className = "correction-button correction-undo";
+    undoButton.textContent = "Undo correction";
+    undoButton.hidden = true;
+
     applyButton.addEventListener("click", () => {
-      void handleApplyCorrection(finding, applyButton, status);
+      void handleApplyCorrection(finding, applyButton, undoButton, status);
     });
-    actions.append(applyButton);
+    undoButton.addEventListener("click", () => {
+      void handleUndoCorrection(finding, applyButton, undoButton, status);
+    });
+
+    actions.append(applyButton, undoButton);
   }
 
   actions.append(status);
@@ -680,7 +695,7 @@ function buildFindingItem(finding) {
   return item;
 }
 
-async function handleApplyCorrection(finding, applyButton, statusElement) {
+async function handleApplyCorrection(finding, applyButton, undoButton, statusElement) {
   if (!state.activeTabId) {
     setCorrectionStatus(
       statusElement,
@@ -710,14 +725,62 @@ async function handleApplyCorrection(finding, applyButton, statusElement) {
     }
 
     applyButton.hidden = true;
+    applyButton.disabled = false;
+    undoButton.hidden = false;
+    undoButton.disabled = false;
     setCorrectionStatus(
       statusElement,
-      "Correction applied temporarily. Reloading the page restores the original text.",
+      "Correction applied temporarily. Undo restores the original text; reloading the page also removes it.",
       "success"
     );
   } catch (error) {
     applyButton.disabled = false;
     applyButton.textContent = "Apply correction";
+    setCorrectionStatus(statusElement, friendlyCorrectionError(error), "error");
+  }
+}
+
+async function handleUndoCorrection(finding, applyButton, undoButton, statusElement) {
+  if (!state.activeTabId) {
+    setCorrectionStatus(
+      statusElement,
+      "The scanned tab is no longer available. Reopen the popup and scan again.",
+      "error"
+    );
+    return;
+  }
+
+  undoButton.disabled = true;
+  undoButton.textContent = "Undoing…";
+  setCorrectionStatus(statusElement, "Restoring the original page text…", "progress");
+
+  try {
+    const response = await chrome.tabs.sendMessage(state.activeTabId, {
+      type: UNDO_MESSAGE_TYPE,
+      candidateId: finding.candidateId,
+    });
+
+    if (!response || response.ok !== true) {
+      const code = typeof response?.code === "string" ? response.code : "";
+      throw new ScanError(
+        CORRECTION_ERROR_MESSAGES[code] || "The correction was not undone."
+      );
+    }
+
+    undoButton.hidden = true;
+    undoButton.disabled = false;
+    undoButton.textContent = "Undo correction";
+    applyButton.hidden = false;
+    applyButton.disabled = false;
+    applyButton.textContent = "Apply correction";
+    setCorrectionStatus(
+      statusElement,
+      "Correction undone. The page's original text is restored.",
+      "success"
+    );
+  } catch (error) {
+    undoButton.disabled = false;
+    undoButton.textContent = "Undo correction";
     setCorrectionStatus(statusElement, friendlyCorrectionError(error), "error");
   }
 }
@@ -737,8 +800,8 @@ function friendlyCorrectionError(error) {
     return "The extension was reloaded. Close and reopen this popup, then scan again.";
   }
 
-  console.warn("[BhashaGuard] Could not apply the correction.", error);
-  return "The correction could not be applied. Reload the page and scan again.";
+  console.warn("[BhashaGuard] Could not change the correction state.", error);
+  return "The correction could not be changed. Reload the page and scan again.";
 }
 
 function resetResults() {

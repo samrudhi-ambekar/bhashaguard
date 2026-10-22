@@ -9,6 +9,7 @@
 
   const SCAN_MESSAGE_TYPE = "BHASHAGUARD_SCAN";
   const APPLY_MESSAGE_TYPE = "BHASHAGUARD_APPLY";
+  const UNDO_MESSAGE_TYPE = "BHASHAGUARD_UNDO";
   const MIN_TEXT_LENGTH = 2;
   const MAX_TEXT_LENGTH = 320;
   const MAX_CANDIDATES = 40;
@@ -93,6 +94,34 @@
           ok: false,
           code: "APPLY_FAILED",
           message: "The correction could not be applied.",
+        });
+      }
+
+      return false;
+    }
+
+    if (message.type === UNDO_MESSAGE_TYPE) {
+      if (!correctionManager) {
+        sendResponse({
+          ok: false,
+          code: "UNDO_UNAVAILABLE",
+          message: "Correction undo is unavailable on this page.",
+        });
+        return false;
+      }
+
+      try {
+        sendResponse(
+          correctionManager.undo({
+            candidateId: message.candidateId,
+          })
+        );
+      } catch (error) {
+        console.error("[BhashaGuard] Correction undo failed.", error);
+        sendResponse({
+          ok: false,
+          code: "UNDO_FAILED",
+          message: "The correction could not be undone.",
         });
       }
 
