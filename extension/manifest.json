@@ -2,13 +2,10 @@
   "manifest_version": 3,
   "name": "BhashaGuard",
   "version": "0.1.0",
-  "description": "Detect potential localization defects and review Marathi corrections.",
+  "description": "Detect. Fix. Preview. Scan visible page text for a future Marathi localization review.",
   "permissions": [
     "activeTab",
     "scripting"
-  ],
-  "host_permissions": [
-    "http://127.0.0.1:8787/*"
   ],
   "action": {
     "default_title": "BhashaGuard",
