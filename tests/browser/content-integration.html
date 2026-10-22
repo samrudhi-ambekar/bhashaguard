@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BhashaGuard content integration harness</title>
+<style>
+  body { margin: 0; padding: 8px; font: 20px/1.5 sans-serif; }
+  div, span { display: block; }
+  #nested span { display: inline; }
+</style>
+</head>
+<body>
+<div id="target">Apply Now</div>
+<div id="other">Download form</div>
+<div id="changed">Change me</div>
+<div id="removed">Remove me</div>
+<div id="nested"><span id="nested-child">Keep this label</span> Nested Apply Now</div>
+<pre id="results">PENDING</pre>
+<script>
+  window.__messages = [];
+  window.chrome = window.chrome || {};
+  window.chrome.runtime = {
+    onMessage: {
+      addListener(listener) { window.__messageListener = listener; }
+    }
+  };
+</script>
+<script src="../../extension/correction-core.js"></script>
+<script src="../../extension/content.js"></script>
+<script>
+(async () => {
+  const phase = sessionStorage.getItem("bg-harness-phase");
+  if (phase === "after") {
+    const previous = JSON.parse(sessionStorage.getItem("bg-harness-results") || "{}");
+    const reloadOk =
+      document.getElementById("target").textContent === "Apply Now" &&
+      document.getElementById("other").textContent === "Download form" &&
+      document.getElementById("changed").textContent === "Change me" &&
+      document.getElementById("nested-child").textContent === "Keep this label";
+    const output = { ...previous, reloadOk };
+    sessionStorage.removeItem("bg-harness-phase");
+    sessionStorage.removeItem("bg-harness-results");
+    document.getElementById("results").textContent = "RESULT:" + JSON.stringify(output);
+    return;
+  }
+
+  const out = {};
+  function send(message) {
+    let response;
+    window.__messageListener(message, {}, (value) => { response = value; });
+    if (!response) throw new Error("No synchronous response for " + message.type);
+    return response;
+  }
+  function text(id) { return document.getElementById(id).textContent; }
+
+  const scan = send({ type: "BHASHAGUARD_SCAN" });
+  out.scanOk = scan.ok === true && Array.isArray(scan.candidates);
+  const byText = new Map(scan.candidates.map((candidate) => [candidate.text, candidate]));
+  const target = byText.get("Apply Now");
+  const other = byText.get("Download form");
+  const changed = byText.get("Change me");
+  const removed = byText.get("Remove me");
+  const nested = byText.get("Nested Apply Now");
+  out.foundTarget = Boolean(target);
+  out.targetActionable = target?.actionable === true;
+  out.nestedNotActionable = nested?.actionable === false;
+
+  out.applyTarget = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: target.id,
+    originalText: "Apply Now",
+    replacementText: "आता अर्ज करा",
+  }).code;
+  out.targetApplied = text("target") === "आता अर्ज करा";
+  out.otherUnchanged = text("other") === "Download form";
+
+  out.undoTarget = send({ type: "BHASHAGUARD_UNDO", candidateId: target.id }).code;
+  out.targetRestored = text("target") === "Apply Now";
+
+  const applyOther = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: other.id,
+    originalText: "Download form",
+    replacementText: "अर्ज डाउनलोड करा",
+  });
+  const applyTargetAgain = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: target.id,
+    originalText: "Apply Now",
+    replacementText: "आता अर्ज करा",
+  });
+  out.applyMultiple = applyOther.code === "APPLIED" && applyTargetAgain.code === "APPLIED";
+  out.undoFirst = send({ type: "BHASHAGUARD_UNDO", candidateId: target.id }).code;
+  out.multipleIndependent =
+    text("target") === "Apply Now" && text("other") === "अर्ज डाउनलोड करा";
+  out.undoSecond = send({ type: "BHASHAGUARD_UNDO", candidateId: other.id }).code;
+  out.allRestored = text("target") === "Apply Now" && text("other") === "Download form";
+
+  out.unknown = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: "bg-fake-999",
+    originalText: "Apply Now",
+    replacementText: "काहीतरी",
+  }).code;
+  out.mismatch = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: target.id,
+    originalText: "Wrong original",
+    replacementText: "काहीतरी",
+  }).code;
+  out.unchangedAfterFailures = text("target") === "Apply Now";
+
+  document.getElementById("changed").firstChild.nodeValue = "Changed after scan";
+  out.changed = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: changed.id,
+    originalText: "Change me",
+    replacementText: "बदलले",
+  }).code;
+  out.changedTextPreserved = text("changed") === "Changed after scan";
+
+  document.getElementById("removed").remove();
+  out.stale = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: removed.id,
+    originalText: "Remove me",
+    replacementText: "काढले",
+  }).code;
+  out.nestedRefused = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: nested.id,
+    originalText: "Nested Apply Now",
+    replacementText: "अंतर्गत अर्ज",
+  }).code;
+  out.nestedChildPreserved = document.getElementById("nested-child").textContent === "Keep this label";
+
+  out.markupRejected = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: target.id,
+    originalText: "Apply Now",
+    replacementText: '<img src=x onerror="window.__xss=1">',
+  }).code;
+  out.noInjectedMarkup = document.querySelector("#target img") === null && window.__xss === undefined;
+
+  out.reapplyBeforeReload = send({
+    type: "BHASHAGUARD_APPLY",
+    candidateId: target.id,
+    originalText: "Apply Now",
+    replacementText: "आता अर्ज करा",
+  }).code;
+  out.pendingBeforeReload = text("target") === "आता अर्ज करा";
+
+  sessionStorage.setItem("bg-harness-results", JSON.stringify(out));
+  sessionStorage.setItem("bg-harness-phase", "after");
+  location.reload();
+})().catch((error) => {
+  const output = { harnessError: String((error && error.stack) || error) };
+  document.getElementById("results").textContent = "RESULT:" + JSON.stringify(output);
+});
+</script>
+</body>
+</html>

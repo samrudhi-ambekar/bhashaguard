@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>BhashaGuard popup integration harness</title></head>
+<body>
+<span id="hostname"></span>
+<button id="scan-button"><span id="scan-button-label">Scan</span></button>
+<span id="status-spinner"></span>
+<p id="status"></p>
+<section id="results" hidden><h2 id="results-heading"></h2><p id="candidate-count"></p><p id="result-summary"></p><ul id="candidate-list"></ul><p id="result-more"></p><figure id="screenshot-figure"><img id="screenshot-preview"><figcaption id="screenshot-caption"></figcaption></figure></section>
+<section id="findings" hidden><h2 id="findings-heading"></h2><p id="finding-count"></p><p id="findings-summary"></p><ul id="findings-list"></ul><p id="findings-empty"></p></section>
+<pre id="results-output">PENDING</pre>
+<script>
+  window.__sent = [];
+  window.chrome = window.chrome || {};
+  window.chrome.tabs = {
+    query: async () => [{ id: 7, url: "https://example.com/", title: "Example", windowId: 1 }],
+    sendMessage: async (tabId, message) => {
+      window.__sent.push({ tabId, message });
+      if (message.type === "BHASHAGUARD_APPLY" && message.candidateId === "bg-test-fail") {
+        return { ok: false, code: "TEXT_CHANGED", message: "changed" };
+      }
+      if (message.type === "BHASHAGUARD_APPLY") {
+        return { ok: true, code: "APPLIED", candidateId: message.candidateId };
+      }
+      if (message.type === "BHASHAGUARD_UNDO") {
+        return { ok: true, code: "UNDONE", candidateId: message.candidateId };
+      }
+      return { ok: false, code: "UNKNOWN" };
+    }
+  };
+</script>
+<script src="../../extension/popup.js"></script>
+<script>
+(async () => {
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    state.activeTabId = 7;
+
+    const candidates = [
+      { id: "bg-test-ok", text: "Apply Now", tag: "button", actionable: true },
+      { id: "bg-test-nested", text: "Nested Apply Now", tag: "div", actionable: false },
+      { id: "bg-test-nosuggestion", text: "Download form", tag: "a", actionable: true },
+      { id: "bg-test-fail", text: "Change me", tag: "p", actionable: true },
+      { id: "bg-test-markup", text: "Markup test", tag: "p", actionable: true },
+    ];
+
+    const analysis = validateAnalysisResponse(
+      {
+        model: "harness-model",
+        findings: [
+          {
+            candidateId: "bg-test-ok",
+            originalText: "Apply Now",
+            suggestedText: "आता अर्ज करा",
+            category: "untranslated",
+            severity: "high",
+            evidence: "English button text",
+            explanation: "The button is still English.",
+            requiresHumanReview: true,
+          },
+          {
+            candidateId: "bg-test-nested",
+            originalText: "Nested Apply Now",
+            suggestedText: "अंतर्गत अर्ज",
+            category: "untranslated",
+            severity: "medium",
+            evidence: "Nested label",
+            explanation: "Part of nested content.",
+            requiresHumanReview: true,
+          },
+          {
+            candidateId: "bg-test-nosuggestion",
+            originalText: "Download form",
+            suggestedText: null,
+            category: "untranslated",
+            severity: "low",
+            evidence: "English label",
+            explanation: "No safe replacement proposed.",
+            requiresHumanReview: true,
+          },
+          {
+            candidateId: "bg-test-fail",
+            originalText: "Change me",
+            suggestedText: "बदलले",
+            category: "untranslated",
+            severity: "high",
+            evidence: "English text",
+            explanation: "Should fail safely.",
+            requiresHumanReview: true,
+          },
+          {
+            candidateId: "bg-test-markup",
+            originalText: "Markup test",
+            suggestedText: '<img src=x onerror="window.__xss=1">',
+            category: "untranslated",
+            severity: "low",
+            evidence: "Literal markup",
+            explanation: "Markup must stay literal.",
+            requiresHumanReview: true,
+          },
+        ],
+      },
+      candidates
+    );
+
+    renderFindings(analysis);
+    const items = [...document.querySelectorAll("#findings-list .finding")];
+    const visibleButtons = (item) =>
+      [...item.querySelectorAll(".correction-button")].filter((button) => !button.hidden);
+    const out = {
+      noAutoApply: window.__sent.length === 0,
+      itemCount: items.length,
+      validationMappedActionable:
+        analysis.findings[0].actionable === true && analysis.findings[1].actionable === false,
+      actionableShowsApply:
+        visibleButtons(items[0]).length === 1 && visibleButtons(items[0])[0].textContent === "Apply correction",
+      nonActionableHidesApply:
+        visibleButtons(items[1]).length === 0 &&
+        items[1].querySelector(".correction-status").textContent.includes("Not safely actionable"),
+      noSuggestionHidesApply:
+        visibleButtons(items[2]).length === 0 &&
+        items[2].querySelector(".correction-status").textContent.includes("No Marathi replacement"),
+      failShowsApply: visibleButtons(items[3]).length === 1,
+      markupLiteral:
+        items[4].querySelector(".finding-suggested").textContent.includes("<img") &&
+        document.querySelector("#findings-list img") === null &&
+        window.__xss === undefined,
+    };
+
+    const applyButton = visibleButtons(items[0])[0];
+    applyButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const applyMessage = window.__sent[0];
+    out.applyMessage =
+      applyMessage?.tabId === 7 &&
+      applyMessage.message.type === "BHASHAGUARD_APPLY" &&
+      applyMessage.message.candidateId === "bg-test-ok" &&
+      applyMessage.message.originalText === "Apply Now" &&
+      applyMessage.message.replacementText === "आता अर्ज करा";
+    out.applyHidesApply = applyButton.hidden === true;
+    const undoButton = items[0].querySelector(".correction-undo");
+    out.applyShowsUndo = undoButton.hidden === false;
+    out.applyStatusMentionsTemporary = items[0]
+      .querySelector(".correction-status")
+      .textContent.includes("applied temporarily");
+
+    undoButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const undoMessage = window.__sent[1];
+    out.undoMessage =
+      undoMessage?.tabId === 7 &&
+      undoMessage.message.type === "BHASHAGUARD_UNDO" &&
+      undoMessage.message.candidateId === "bg-test-ok";
+    out.undoShowsApply = applyButton.hidden === false;
+    out.undoHidesUndo = undoButton.hidden === true;
+    out.undoStatusMentionsRestored = items[0]
+      .querySelector(".correction-status")
+      .textContent.includes("original text is restored");
+
+    visibleButtons(items[3])[0].click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    out.failureKeepsApply = visibleButtons(items[3]).length === 1;
+    out.failureStatusMentionsChanged = items[3]
+      .querySelector(".correction-status")
+      .textContent.includes("text changed");
+
+    document.getElementById("results-output").textContent = "RESULT:" + JSON.stringify(out);
+  } catch (error) {
+    document.getElementById("results-output").textContent =
+      "RESULT:" + JSON.stringify({ harnessError: String((error && error.stack) || error) });
+  }
+})();
+</script>
+</body>
+</html>
